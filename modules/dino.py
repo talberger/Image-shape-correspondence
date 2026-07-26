@@ -29,10 +29,21 @@ class DINOWrapper(ModelWrapper):
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        # --- Tal edit start ---
+        # Pinned to a local checkout of dinov2 @ 9c7e324 (2023-10-27, "Add new
+        # backbones trained with registers") — the earliest commit with the
+        # *_reg backbones, from well before upstream `main` introduced
+        # `float | None` syntax (PEP 604, Python 3.10+ only) into
+        # layers/attention.py and layers/block.py, which breaks under our
+        # Python 3.9 env. Original code called
+        # torch.hub.load('facebookresearch/dinov2', ...), which pulls
+        # upstream `main` and would crash on import.
+        dinov2_local_repo = '/workspace/.cache/dinov2_git'
         if not small:
-            self.model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitg14_reg').to(device)
+            self.model = torch.hub.load(dinov2_local_repo, 'dinov2_vitg14_reg', source='local').to(device)
         else:
-            self.model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg').to(device)
+            self.model = torch.hub.load(dinov2_local_repo, 'dinov2_vitl14_reg', source='local').to(device)
+        # --- Tal edit end ---
         self.model.eval()
 
         self.target_size = target_size

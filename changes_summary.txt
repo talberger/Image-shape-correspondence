@@ -1,0 +1,42 @@
+Code changes summary - bsb repo (guitar/dino encoder bug)
+===========================================================
+
+encoder.py
+----------
+1. generate_random_views(): now saves random_viewing_angles.pt (elev/azim
+   lists) at the end. Original code never persisted it, causing
+   FileNotFoundError in every later step.
+
+2. __main__: start_training now calls train_encoder(args, model) instead of
+   train_encoder(args, sam). `sam` was undefined when model_type=='dino',
+   causing a NameError. (The `sam` param is unused inside train_encoder
+   anyway.)
+
+modules/dino.py
+----------------
+3. DINOWrapper loads dinov2 from a local checkout pinned to commit 9c7e324
+   instead of torch.hub.load(...) from upstream main. Upstream main uses
+   Python 3.10-only syntax that breaks under our Python 3.9 env.
+
+modules/dataset.py
+-------------------
+4. EncoderDataset.prepare_path_list: now globs/caches under
+   "{model_type}_f/" instead of a hardcoded "sam_f/". For model_type=='dino'
+   the hardcoded path pointed at an empty directory, so the dataset silently
+   had 0 samples.
+
+5. EncoderDataset._load_data: reads file['model_f'] instead of
+   file['sam_f']. encode_random_views always saves features under the
+   literal key 'model_f', regardless of model_type - so the old key was
+   wrong for every model_type, not just dino.
+
+6. EncoderDataset.__init__: added a check that raises RuntimeError if the
+   dataset ends up with 0 samples, instead of silently training on nothing.
+   This is what let the original bug run for epochs with no error and no
+   gradient steps.
+
+Root cause (for context)
+-------------------------
+Because of (4)+(5), DataLoader got 0 batches for dino training. The training
+loop body never executed - no error, no warning - and the "trained" encoder
+checkpoint saved at the end was actually just randomly-initialized weights.

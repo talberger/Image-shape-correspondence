@@ -207,6 +207,14 @@ def generate_random_views(args):
         
         save_renders(os.path.join(args.encoder_data_dir, '{}/'.format(args.render_res)), 0, target_rendered_images, name='target_save_{}.png'.format(int(i)))
 
+    # --- Tal edit start ---
+    # Original code never persisted elev_list/azim_list to disk, so
+    # encode_random_views/train_encoder/the "Resume" branch above all fail
+    # with FileNotFoundError on random_viewing_angles.pt. Save it here.
+    torch.save({'elev': elev_list, 'azim': azim_list},
+               os.path.join(args.encoder_data_dir, '{}/random_viewing_angles.pt'.format(args.render_res)))
+    # --- Tal edit end ---
+
 
 def encode_random_views(args, model_type, model):
     print(f"Generate encoded image features for model %s" % model_type)
@@ -457,7 +465,13 @@ if __name__ == '__main__':
         encode_random_views(args, args.model_type, model)
     
     if args.start_training == 1:
-        train_encoder(args, sam)
+        # --- Tal edit start ---
+        # Original code always called train_encoder(args, sam), but `sam` is
+        # only defined when model_type=='sam' -> NameError when
+        # model_type=='dino'. train_encoder's `sam` param is unused inside
+        # the function body anyway, so pass `model` (always defined) instead.
+        train_encoder(args, model)
+        # --- Tal edit end ---
     
     if args.test == 1:
         test_encoder(args, sam)

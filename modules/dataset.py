@@ -25,33 +25,62 @@ class EncoderDataset(Dataset):
         all_data_paths.extend(random_samf_list)
                 
         self.data_paths = all_data_paths
-        self.data_length = len(self.data_paths)      
-        self.args = args     
-    
+        self.data_length = len(self.data_paths)
+        self.args = args
+
+        # --- Tal edit start ---
+        # An empty dataset here means DataLoader silently yields 0 batches,
+        # so train_encoder's loop body never runs but still saves a
+        # never-trained checkpoint with no error. Fail loudly instead. This
+        # is exactly what happened with the sam_f/model_type bug: the glob
+        # in prepare_path_list found 0 files and nothing downstream noticed.
+        if self.data_length == 0:
+            raise RuntimeError(
+                "EncoderDataset is empty (0 files found for model_type={!r} "
+                "under {}). Training would silently run 0 gradient steps. "
+                "Check that encode_random_views was run for this model_type "
+                "and that the {}_f/{} directory is populated.".format(
+                    args.model_type, data_dir, args.model_type, args.render_res))
+        # --- Tal edit end ---
+
     def __len__(self):
         return self.data_length
 
     def __getitem__(self, file_idx):
         data_sample = self._load_data(os.path.join(self.data_paths[file_idx]))
-    
+
         return data_sample
     
     def _load_data(self, file_path):
-        
-        with torch.no_grad():            
+
+        with torch.no_grad():
             file = torch.load(file_path)
-            sam_f = file['sam_f']
-            elev = file['elev'] 
+            # --- Tal edit start ---
+            # Original code always read file['sam_f'], but encode_random_views
+            # (encoder.py:249) always saves under the literal key 'model_f'
+            # regardless of model_type, so this raised KeyError for every
+            # model_type ('sam' included, since it was never 'sam_f' either).
+            sam_f = file['model_f']
+            #old was sam_f = file['sam_f']
+            # --- Tal edit end ---
+            elev = file['elev']
             azim = file['azim']
-        
-            return sam_f.cuda(), elev.unsqueeze(0).cuda(), azim.unsqueeze(0).cuda() 
+
+            return sam_f.cuda(), elev.unsqueeze(0).cuda(), azim.unsqueeze(0).cuda()
 
 
     @staticmethod
     def prepare_path_list(data_dir, args):
-        save_path = os.path.join(data_dir, 'sam_f', 'encoder_samf_path.pt')
+        # --- Tal edit start ---
+        # Original code hardcoded the 'sam_f' directory here regardless of
+        # args.model_type, so for model_type=='dino' this always resolved to
+        # the empty sam_f/ dir (0 files) -> EncoderDataset silently had
+        # length 0 -> DataLoader produced 0 batches -> train_encoder ran 0
+        # gradient steps with no error. Use args.model_type instead.
+        save_path = os.path.join(data_dir, '{}_f'.format(args.model_type), 'encoder_{}f_path.pt'.format(args.model_type))
         if not os.path.exists(save_path):
-            file_paths = glob(os.path.join(data_dir, 'sam_f', '{}'.format(args.render_res), '*'))
+            file_paths = glob(os.path.join(data_dir, '{}_f'.format(args.model_type), '{}'.format(args.render_res), '*'))
+            # --- Tal edit end ---
             try:
                 torch.save(file_paths, save_path)
             except PermissionError:
