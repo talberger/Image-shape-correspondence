@@ -9,5 +9,6 @@ pip install transformers==4.34.0 # install additional packages
 pip install open3d==0.17.0 # install additional packages
 pip install opencv-python==4.8.1.78 # install additional packages
 pip install scikit-image==0.22.0 # install additional packages
+pip install scikit-learn==1.6.1 # install additional packages
 pip install plyfile==1.0.1 # install additional packages
 pip install numpy==1.26.4 # reinstall NumPy for compatibility with other packages
