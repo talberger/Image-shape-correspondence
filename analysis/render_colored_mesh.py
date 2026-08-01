@@ -1,5 +1,5 @@
 """
-A3 (visual QA): render a colored mesh (produced by color_mesh_from_knn.py) from
+visual QA: render a colored mesh (produced by color_mesh_from_knn.py) from
 several camera angles, in the same spirit as image_shape_correspondence.py's
 'rendered_views_*.png' outputs. Optionally also builds a side-by-side PNG:
 a source image on the left, followed by all the rendered views (in order) on
@@ -7,7 +7,7 @@ the right, for a quick visual sanity check of the pixel->vertex
 correspondence.
 
 The source image should be:
-  - the plain A1 <mode>_color.png (pca_color.png or position_color.png,
+  - the plain <mode>_color.png (pca_color.png or position_color.png,
     from pixel_coloring.py), when the mesh was colored from all masked
     pixels (color_mesh_from_knn.py with no --num_pixels/--pixel_indices), or
   - the *_clicked_pixels.png (also from color_mesh_from_knn.py), when the
@@ -18,7 +18,7 @@ Run (view grid only):
 cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/render_colored_mesh.py \
   --ply_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_mesh_color_pca_k1.ply
 
-Run (view grid + side-by-side against the A1 source coloring):
+Run (view grid + side-by-side against the pixel-coloring source):
 cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/render_colored_mesh.py \
   --ply_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_mesh_color_pca_k1.ply \
   --source_image_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_pca_color.png
@@ -230,7 +230,7 @@ if __name__ == '__main__':
                               'views of the guitar (kept fixed regardless of --ply_path/--k so runs stay '
                               'comparable).')
     parser.add_argument('--source_image_path', type=str, default=None,
-                         help='image to place on the left of the side-by-side output: the plain A1 '
+                         help='image to place on the left of the side-by-side output: the plain '
                               '<mode>_color.png (pca_color.png or position_color.png) when coloring from '
                               'all pixels, or the '
                               '*_clicked_pixels.png (from color_mesh_from_knn.py --num_pixels/'

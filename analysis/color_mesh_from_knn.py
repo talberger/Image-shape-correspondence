@@ -1,19 +1,19 @@
 """
-A3: color the mesh using A1's per-pixel colors (`pixel_coloring.py`, either
-`--mode pca` or `--mode position`) and A2's per-pixel top-K nearest-vertex
-correspondences. For every masked pixel, its A1 color is painted onto its
-top-K nearest vertices (from A2), weighted by cosine similarity. A vertex
+mesh coloring: color the mesh using pixel_coloring.py's per-pixel colors (`pixel_coloring.py`, either
+`--mode pca` or `--mode position`) and pixel_to_vertex_nn.py's per-pixel top-K nearest-vertex
+correspondences. For every masked pixel, its pixel color is painted onto its
+top-K nearest vertices (from pixel_to_vertex_nn.py), weighted by cosine similarity. A vertex
 touched by multiple (pixel, neighbor-rank) contributions gets their
 similarity-weighted average; a vertex touched by none is colored neutral
 gray. Output is an ASCII .ply, viewable in MeshLab.
 
-Run (pca colors, A1's default mode):
+Run (pca colors, pixel_coloring.py's default mode):
 cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/color_mesh_from_knn.py \
   --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth --k 1
 
-Or with A1's --mode position colors instead (e.g. as a correspondence sanity
+Or with pixel_coloring.py's --mode position colors instead (e.g. as a correspondence sanity
 check independent of the DINO features: smooth position colors should stay
-roughly smooth across the mesh if A2's feature-based correspondence respects
+roughly smooth across the mesh if the feature-based correspondence respects
 spatial locality):
 cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/color_mesh_from_knn.py \
   --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth --k 1 \
@@ -25,7 +25,7 @@ cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/color_me
   --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth --k 1 \
   --num_pixels 5 --seed 0
 This also saves a `*_clicked_pixels.png`: the original photo with each of the
-5 chosen pixels marked as a small circle in its own A1 color, so you can see
+5 chosen pixels marked as a small circle in its own pixel color, so you can see
 where on the real photo they came from alongside the mesh they painted.
 """
 
@@ -200,21 +200,21 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--mask_path', type=str,
                          default='./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth',
-                         help='used only to derive default paths below (same mask A1/A2 were run on)')
+                         help='used only to derive default paths below (same mask the pixel coloring and NN steps were run on)')
     parser.add_argument('--save_dir', type=str, default='./demo/guitar/bsb/')
     parser.add_argument('--knn_path', type=str, default=None,
-                         help='defaults to <save_dir>/<mask_basename>_pixel_to_vertex_nn.pth (A2 output)')
+                         help='defaults to <save_dir>/<mask_basename>_pixel_to_vertex_nn.pth (pixel_to_vertex_nn.py output)')
     parser.add_argument('--color_mode', type=str, choices=['pca', 'position'], default='pca',
                          help="which of pixel_coloring.py's --mode outputs to paint the mesh with; "
                               'also selects the default --color_path filename')
     parser.add_argument('--color_path', type=str, default=None,
                          help='defaults to <save_dir>/<mask_basename>_<color_mode>_color.png '
-                              '(pixel_coloring.py output, A1)')
+                              '(pixel_coloring.py output)')
     parser.add_argument('--obj_path', type=str, default='./meshes/guitar.obj')
     parser.add_argument('--output_path', type=str, default=None,
                          help='defaults to <save_dir>/<mask_basename>_mesh_color_<color_mode>_k<k>.ply')
     parser.add_argument('--k', type=int, default=1,
-                         help='number of nearest vertices per pixel to paint (must be <= top_k stored in A2 output)')
+                         help='number of nearest vertices per pixel to paint (must be <= top_k stored in the pixel_to_vertex_nn.py output)')
     parser.add_argument('--uncovered_color', nargs=3, type=int, default=[128, 128, 128],
                          help='RGB (0-255) for vertices with zero contributing pixels')
     parser.add_argument('--num_pixels', type=int, default=None,
@@ -229,7 +229,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0,
                          help='random seed for --pixel_selection random')
     parser.add_argument('--img_path', type=str, default='./images/guitar_01.png',
-                         help='original (non-A1-colored) photo to draw --num_pixels/--pixel_indices click '
+                         help='original (uncolored) photo to draw --num_pixels/--pixel_indices click '
                               'markers on; only used when pixel-subsampling is active')
     parser.add_argument('--clicked_pixels_output_path', type=str, default=None,
                          help='defaults to <save_dir>/<mask_basename>_mesh_color_<color_mode>_k<k>_pix_'

@@ -1,5 +1,5 @@
 """
-A1: color every pixel of a SAM-segmented object, either by its DINO feature
+pixel coloring: color every pixel of a SAM-segmented object, either by its DINO feature
 (--mode pca) or by its 2D position in the mask (--mode position).
 
 pca: reduced to RGB via PCA(3), following the pixel-coloring technique from

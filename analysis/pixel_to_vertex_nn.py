@@ -1,9 +1,9 @@
 """
-A2: for every pixel of a SAM-segmented object, find its nearest
+pixel -> vertex nearest neighbours: for every pixel of a SAM-segmented object, find its nearest
 neighbor (NN) vertex on the shape, by cosine similarity between the
 pixel's per-pixel DINO feature and each vertex's per-vertex DINO
 feature (from the trained Encoder in modules/encoder.py). Also records
-the top-K nearest vertices per pixel (not just the top-1), so A3 can
+the top-K nearest vertices per pixel (not just the top-1), so the mesh-coloring step can
 both color the mesh from the top-1 match and inspect the KNN of a
 chosen pixel.
 
