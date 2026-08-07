@@ -10,22 +10,32 @@ mesh vertices. The paper's equations, and what each becomes here:
   Eq. 2  w_ij = softmax over the k_cc vertices nearest i *in feature space*
                 (plain softmax, no temperature)
   Eq. 3  y_i_hat = sum_j w_ij * y_j     <- weighted average of vertex POSITIONS
-  Eq. 9  L = mean over (i, l) of v_il * ||y_i_hat - y_l_hat||^2,
-                where l ranges over i's k_m nearest neighbours *in 2D pixel
-                space*, and v_il = exp(-||x_i - x_l||^2 / alpha)
+  Eq. 9  L = mean over (i, l) of ||y_i_hat - y_l_hat||^2, where l ranges over
+                the 8 pixels immediately surrounding i in the image
 
 The two neighbourhoods live in different spaces and behave differently:
 
   feature-space (k_vertices_per_pixel) -> must be recomputed every step, because
       the vertex features change as the encoder trains.
-  pixel-space   (k_pixel_neighbors)    -> computed once, because pixel
+  pixel-space   (the 8-pixel ring)     -> computed once, because pixel
       coordinates never change.
 
 Selecting neighbours in feature space but averaging their *positions* is what
 makes y_i_hat a soft point on the surface rather than a hard nearest vertex.
 
-Naming note: DPC's k_cc / k_m are opaque, so this module uses
-`k_vertices_per_pixel` and `k_pixel_neighbors` instead.
+Naming note: DPC's k_cc is opaque, so this module uses `k_vertices_per_pixel`.
+
+HISTORY -- read this before changing `build_adjacent_neighbors`. Until
+2026-08-02 the pixel neighbours were the k=7 nearest *among the sampled center
+pixels* (`build_pixel_neighbors`, kept below for the analysis/measure_* scripts),
+which put them a mean of 11.4 px apart instead of the intended ~1.2 px. That is
+not what the loss was meant to express, and it invalidates the phase-2 results
+recorded in FINE_TUNING_PLAN.md. The justification given at the time -- "a pixel
+that wasn't sampled has no y_hat, so it cannot be a neighbour" -- is wrong:
+y_hat is a function of a pixel's DINO feature, and features exist for every
+pixel in the image. Nothing stops us computing y_hat for the neighbours too, and
+`build_adjacent_neighbors` + the [n*(1+k)] batching in train_mapping_loss.py is
+exactly that.
 """
 import numpy as np
 import torch
@@ -79,15 +89,20 @@ def sample_center_pixels(coarse_mask, fine_segments, num_pixels, seed=0):
 
 
 def build_pixel_neighbors(coords, segment_ids, k):
-    """For each center pixel, its k nearest center pixels in the same segment.
+    """LEGACY -- not used by training. For each center pixel, its k nearest
+    *center* pixels in the same segment.
+
+    Superseded by `build_adjacent_neighbors`: drawing neighbours from the center
+    set puts them ~11.4 px apart, which is not the intended neighbourhood (see
+    the module docstring). Kept because analysis/measure_neighbor_stats.py and
+    analysis/measure_neighbor_features.py import it to characterise what the old
+    phase-2 run actually trained on.
 
     Computed once -- pixel coordinates do not change during training.
 
-    Neighbours are drawn from the center set itself, matching DPC (its Eq. 9
-    neighbourhood N_X lives inside the same sampled point cloud). Restricting to
-    one segment is what keeps the loss from pulling together pixels that merely
-    happen to be adjacent across a part boundary, e.g. where the neck meets the
-    body.
+    Restricting to one segment is what keeps the loss from pulling together
+    pixels that merely happen to be adjacent across a part boundary, e.g. where
+    the neck meets the body.
 
     Segments smaller than k+1 members yield fewer than k neighbours; those slots
     are marked invalid rather than padded with far-away pixels, so a small
@@ -120,6 +135,66 @@ def build_pixel_neighbors(coords, segment_ids, k):
     return neighbor_idx, neighbor_valid
 
 
+# The 8-connected ring, in reading order. Fixed and documented because the
+# column order of `neighbor_valid` is only interpretable against it.
+NEIGHBOR_OFFSETS = ((-1, -1), (-1, 0), (-1, 1),
+                    (0, -1), (0, 1),
+                    (1, -1), (1, 0), (1, 1))
+
+
+def build_adjacent_neighbors(coords, segment_ids, fine_segments, stride=1):
+    """For each center pixel, the 8 pixels surrounding it in the image.
+
+    This is the intended pixel neighbourhood: `stride=1` gives the immediately
+    adjacent pixels, a mean of (4 + 4*sqrt(2))/8 = 1.2071 px away. `stride`
+    scales the ring outward and exists only so the neighbourhood's spatial
+    extent can be varied later; it is not part of the algorithm.
+
+    Unlike `build_pixel_neighbors` these neighbours are arbitrary image pixels,
+    not members of the center set, so the caller must compute a y_hat for them
+    too -- see the [n*(1+k)] batching in train_mapping_loss.py.
+
+    A neighbour is valid only if it lies in the *same fine segment* as its
+    center, which keeps the loss from pulling together pixels that merely happen
+    to be adjacent across a part boundary (e.g. where the neck meets the body).
+    Since build_fine_segments.py ANDs every SAM mask with the coarse object mask
+    before painting, `fine_segments > 0` is a strict subset of that mask, so the
+    same-segment test alone already guarantees the neighbour is on the object.
+
+    Everything stays on CPU: the coordinates are used to index the 3.6 GB pixel
+    feature file, and torch rejects a mix of CPU and CUDA index tensors.
+
+    Returns (neighbor_coords, neighbor_valid):
+        neighbor_coords int64 [n, 8, 2]  (row, col), clamped into the image
+        neighbor_valid  bool  [n, 8]
+    """
+    if coords.device.type != 'cpu':
+        raise ValueError('coords must stay on CPU -- they index the pixel '
+                         'feature file (got %s)' % coords.device)
+
+    segments = torch.as_tensor(np.asarray(fine_segments)).long()
+    height, width = segments.shape
+
+    offsets = torch.tensor(NEIGHBOR_OFFSETS, dtype=torch.long) * stride  # [8, 2]
+    unclamped = coords.unsqueeze(1) + offsets.unsqueeze(0)               # [n, 8, 2]
+
+    # Out-of-bounds must be decided on the UNCLAMPED coordinates. Clamping first
+    # would let an off-image slot snap to an edge pixel that happens to share the
+    # center's segment, and be counted as an adjacent neighbour it is nowhere
+    # near. Unreachable at stride=1 for this image, but not in general.
+    out_of_bounds = ((unclamped[..., 0] < 0) | (unclamped[..., 0] >= height) |
+                     (unclamped[..., 1] < 0) | (unclamped[..., 1] >= width))
+
+    neighbor_coords = torch.stack(
+        [unclamped[..., 0].clamp(0, height - 1),
+         unclamped[..., 1].clamp(0, width - 1)], dim=-1)
+
+    segment_at_neighbor = segments[neighbor_coords[..., 0], neighbor_coords[..., 1]]
+    neighbor_valid = ~out_of_bounds & (segment_at_neighbor == segment_ids.unsqueeze(1))
+
+    return neighbor_coords, neighbor_valid
+
+
 def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k):
     """DPC Eq. 1-3: map each pixel to a soft point on the mesh surface.
 
@@ -137,8 +212,13 @@ def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k):
 
     Returns [n, 3] soft-mapped points.
     """
-    # One matmul: at n~2048 and V~4036 this is ~33 MB, so unlike the full-image
-    # case in analysis/pixel_to_vertex_nn.py no chunking is needed.
+    # One matmul. Training calls this with n = 2048 centers + 2048*8 neighbours
+    # = 18432 rows, so at V~4036 the similarity is ~297 MB -- the dominant
+    # allocation, but still far from needing the chunking that the full-image
+    # case in analysis/pixel_to_vertex_nn.py does. It does not survive into the
+    # backward pass: topk saves only its indices, softmax saves its [n, k]
+    # output, and the matmul saves its two (small) inputs. Measured peak was
+    # 757 MB for the whole forward+backward.
     similarity = pixel_features @ F.normalize(vertex_features, dim=-1).t()
 
     topk_similarity, topk_idx = torch.topk(similarity, k, dim=1)
@@ -150,38 +230,40 @@ def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k):
     return (weights.unsqueeze(-1) * neighbor_positions).sum(dim=1)
 
 
-def mapping_loss(soft_points, neighbor_idx, neighbor_valid,
-                 normalized_coords=None, weighting='uniform', alpha=8.0):
+def mapping_loss(center_points, neighbor_points, neighbor_valid):
     """DPC Eq. 9: penalize nearby pixels whose soft-mapped points drift apart.
 
-    `weighting`:
-      'uniform'  -- v_il = 1. The default, and effectively what DPC does: at
-                    their scale alpha=8 gives v_il ~ 0.9999, so their Gaussian
-                    is very nearly uniform anyway. With a small
-                    k_pixel_neighbors the k nearest pixels are all at similar
-                    distance, which makes the Gaussian close to degenerate.
-      'gaussian' -- v_il = exp(-||x_i - x_l||^2 / alpha) on the normalized
-                    coordinates. Worth enabling once k_pixel_neighbors is large
-                    enough for the distances to actually vary.
+    Args:
+        center_points   [n, 3]     y_hat of each center pixel
+        neighbor_points [n, k, 3]  y_hat of each center's surrounding pixels
+        neighbor_valid  [n, k]
 
-    Returns a scalar. Pairs marked invalid contribute nothing to either the
-    numerator or the denominator.
+    Returns a scalar. Invalid pairs contribute to neither the numerator nor the
+    denominator. The denominator is global rather than per-row on purpose: a
+    center with no valid neighbours at all then drops out cleanly instead of
+    producing 0/0. (At stride=1 on the guitar, 2 of 2048 centers are in that
+    state.)
+
+    DPC's Gaussian weight v_il = exp(-||x_i - x_l||^2 / alpha) is gone, not
+    forgotten. On normalized coordinates (divided by the ~1231 px bbox diagonal)
+    a 1 px offset gives d^2/alpha = 8.2e-8, so exp(-d^2/alpha) is 1-2 ulp from
+    1.0 in fp32 and is *bit-identical* for the 4 axial and 4 diagonal
+    neighbours. At this scale the Gaussian is exactly uniform; keeping the flag
+    would only suggest a choice that does not exist.
+
+    WHAT THIS ACTUALLY OPTIMIZES, measured on the phase-1 encoder at stride=1:
+    the median pair distance is 5.9e-06 and 31% of pairs already resolve to the
+    *identical* ordered top-10 vertex set, i.e. the smoothness objective is
+    ~99.99% satisfied before training starts, and 8% of pairs carry 90% of the
+    loss. The residual gradient therefore lives almost entirely in the
+    discontinuity of the topk in `soft_map_to_vertices` -- in practice this
+    penalizes top-k boundary flips between adjacent pixels rather than
+    smoothness per se. That is expected (adjacent pixels share a DINO patch by
+    construction), but it is what any result here has to be read against.
     """
-    neighbor_points = soft_points[neighbor_idx]                       # [n, k, 3]
-    squared_distance = (soft_points.unsqueeze(1) - neighbor_points).pow(2).sum(-1)
-
-    if weighting == 'uniform':
-        weight = torch.ones_like(squared_distance)
-    elif weighting == 'gaussian':
-        if normalized_coords is None:
-            raise ValueError("weighting='gaussian' needs normalized_coords")
-        pixel_offset = normalized_coords.unsqueeze(1) - normalized_coords[neighbor_idx]
-        weight = torch.exp(-pixel_offset.pow(2).sum(-1) / alpha)
-    else:
-        raise ValueError('unknown weighting: %s' % weighting)
-
+    squared_distance = (center_points.unsqueeze(1) - neighbor_points).pow(2).sum(-1)
     valid = neighbor_valid.float()
-    return (weight * squared_distance * valid).sum() / valid.sum().clamp(min=1.0)
+    return (squared_distance * valid).sum() / valid.sum().clamp(min=1.0)
 
 
 def feature_drift(vertex_features, reference_features):

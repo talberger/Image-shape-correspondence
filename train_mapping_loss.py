@@ -7,6 +7,12 @@ checkpoint and trains on a completely different signal, and on that signal only:
 
     pixels close together in the photo should map to nearby points on the mesh.
 
+Concretely: sample 2048 center pixels, compute a soft surface point y_hat for
+each, do the same for the 8 pixels immediately surrounding each of them, and
+penalize the distance between a center's y_hat and its neighbours'. Because the
+neighbours are ordinary image pixels rather than members of the center set, a
+y_hat is computed for 2048 * 9 = 18432 pixels per step.
+
 Combining the two losses in one run is a deliberate later step, not this one.
 
 This is a separate entrypoint rather than another stage inside encoder.py so
@@ -21,6 +27,7 @@ See /workspace/FINE_TUNING_PLAN.md for the full design and the reasoning behind
 each default.
 """
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -33,7 +40,7 @@ import torch
 import torch.nn.functional as F
 
 from modules.encoder import Encoder
-from modules.mapping_loss import (build_pixel_neighbors, feature_drift, mapping_loss,
+from modules.mapping_loss import (build_adjacent_neighbors, feature_drift, mapping_loss,
                                   sample_center_pixels, soft_map_to_vertices)
 from modules.utils import device, load_state_dict, loadmesh
 
@@ -119,12 +126,31 @@ def load_pixel_features(path, coords):
     built once outside the training loop, and the second step's backward dies
     with "trying to backward through the graph a second time". These features
     are a frozen target -- no gradient should reach them.
+
+    `coords` must be on CPU: torch rejects a CUDA index tensor against a CPU
+    source. Advanced indexing already copies, so no .clone() is needed.
     """
     all_features = torch.load(path, map_location='cpu')
-    features = all_features[coords[:, 0], coords[:, 1]].clone().to(device).detach()
+    features = all_features[coords[:, 0], coords[:, 1]].detach().to(device)
     del all_features
     # Frozen, so normalize once here instead of every step.
     return F.normalize(features.float(), dim=-1)
+
+
+def hash_input(path):
+    """sha256 of an input file, recorded in run_config.json.
+
+    .gitignore excludes demo*/ and experiments*/, so every input to this run is
+    unversioned and identified only by a path -- and paths move. The previous
+    run's run_config.json points at ./demo/guitar/bsb/guitar_01_fine_segments.pth,
+    which no longer exists (it was moved to demo/guitar/phase2/). A digest makes
+    each run self-identifying regardless of where its inputs ended up.
+    """
+    digest = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def save_loss_plot(losses, drifts, checkpoint_every, path):
@@ -159,26 +185,46 @@ def train(args):
     coarse_mask = torch.load(args.object_mask_path, map_location='cpu').numpy()
     fine_segments = torch.load(args.fine_seg_path, map_location='cpu').numpy()
 
-    coords, normalized_coords, segment_ids = sample_center_pixels(
+    # Everything here stays on CPU: these coordinates index the 3.6 GB pixel
+    # feature file below, and torch rejects a CUDA index against a CPU source.
+    coords, _, segment_ids = sample_center_pixels(
         coarse_mask, fine_segments, args.num_center_pixels, seed=args.seed)
-    coords = coords.to(device)
-    normalized_coords = normalized_coords.to(device)
-    segment_ids = segment_ids.to(device)
 
-    neighbor_idx, neighbor_valid = build_pixel_neighbors(
-        coords, segment_ids, args.k_pixel_neighbors)
+    neighbor_coords, neighbor_valid = build_adjacent_neighbors(
+        coords, segment_ids, fine_segments, stride=args.neighbor_stride)
+    num_centers, num_neighbors = neighbor_valid.shape
 
-    num_segments = len(torch.unique(segment_ids))
-    pairs = int(neighbor_valid.sum().item())
-    full = int((neighbor_valid.sum(dim=1) == args.k_pixel_neighbors).sum().item())
-    print('sampled %d center pixels across %d segments' % (len(coords), num_segments))
-    print('  %d neighbour pairs; %d/%d pixels have the full %d neighbours'
-          % (pairs, full, len(coords), args.k_pixel_neighbors))
+    # y_hat has to be computed for the neighbour pixels too -- they are ordinary
+    # image pixels, not members of the center set. One flat batch of
+    # [centers, then all neighbours row-major] keeps the indexing trivial: the
+    # centers are rows [:n] and neighbour (i, j) is row n + i*k + j. Invalid
+    # slots ride along and compute a y_hat the mask discards; ~2% waste, and it
+    # avoids a dedup/scatter step that would buy nothing.
+    all_coords = torch.cat([coords, neighbor_coords.reshape(-1, 2)], dim=0)
 
-    pixel_features = load_pixel_features(args.pix_dino_features_path, coords.cpu())
+    pixel_distance = (coords.float().unsqueeze(1) - neighbor_coords.float()).pow(2).sum(-1).sqrt()
+    print('sampled %d center pixels across %d segments'
+          % (num_centers, len(torch.unique(segment_ids))))
+    print('  %d/%d neighbour pairs valid; %d centers have all %d, %d have none'
+          % (int(neighbor_valid.sum()), neighbor_valid.numel(),
+             int((neighbor_valid.sum(1) == num_neighbors).sum()), num_neighbors,
+             int((neighbor_valid.sum(1) == 0).sum())))
+    # The assertion that the neighbourhood is the intended one: 1.207 px at
+    # stride 1 = (4 + 4*sqrt(2))/8. The pre-2026-08-02 code printed 11.4 here.
+    print('  mean neighbour distance %.4f px (stride %d)'
+          % (pixel_distance[neighbor_valid].mean(), args.neighbor_stride))
+
+    pixel_features = load_pixel_features(args.pix_dino_features_path, all_coords)
     print('  pixel features %s' % (tuple(pixel_features.shape),))
+    neighbor_valid = neighbor_valid.to(device)
 
-    optimizer = torch.optim.Adam(encoder.parameters(), args.lr)
+    # eps far below the default 1e-8: at stride 1 the gradient RMS over the
+    # encoder's 7.36M parameters is ~1e-9, so with the default eps Adam leaves
+    # its scale-invariant regime (sqrt(v_hat) << eps) and degenerates toward SGD
+    # with a ~10x smaller effective step. The run would then report drift ~1.000
+    # and unchanged coverage, which reads as "harmless" but means "the optimizer
+    # never moved".
+    optimizer = torch.optim.Adam(encoder.parameters(), args.lr, eps=args.adam_eps)
     os.makedirs(args.out_dir, exist_ok=True)
 
     losses = []
@@ -193,11 +239,19 @@ def train(args):
 
         soft_points = soft_map_to_vertices(
             pixel_features, vertex_features, vertices, args.k_vertices_per_pixel)
-        loss = mapping_loss(soft_points, neighbor_idx, neighbor_valid,
-                            normalized_coords=normalized_coords,
-                            weighting=args.pixel_weighting, alpha=args.alpha)
+        loss = mapping_loss(soft_points[:num_centers],
+                            soft_points[num_centers:].view(num_centers, num_neighbors, 3),
+                            neighbor_valid)
 
         loss.backward()
+
+        if step == 1:
+            # The number that says whether this run can move at all -- see the
+            # --adam_eps comment above. Print it once rather than trusting it.
+            grad_norm = torch.cat([p.grad.reshape(-1) for p in encoder.parameters()
+                                   if p.grad is not None]).norm().item()
+            print('step    1  total grad norm %.4e' % grad_norm)
+
         optimizer.step()
         losses.append(loss.item())
 
@@ -231,8 +285,12 @@ def train(args):
 
     save_loss_plot(losses, drifts, args.checkpoint_every,
                    os.path.join(args.out_dir, 'mapping_loss.png'))
+    config = {k: v for k, v in vars(args).items()}
+    config['input_sha256'] = {
+        path: hash_input(path) for path in (args.object_mask_path, args.fine_seg_path,
+                                            args.pix_dino_features_path)}
     with open(os.path.join(args.out_dir, 'run_config.json'), 'w') as f:
-        json.dump({k: v for k, v in vars(args).items()}, f, indent=2)
+        json.dump(config, f, indent=2)
 
     print('\nloss %.6f -> %.6f over %d steps' % (losses[0], losses[-1], len(losses)))
     print('final drift vs phase 1: %.4f' % drifts[-1][1])
@@ -274,23 +332,22 @@ if __name__ == '__main__':
     parser.add_argument('--k_vertices_per_pixel', type=int, default=10,
                         help="mesh vertices each pixel is softly mapped onto, nearest in "
                              "FEATURE space (DPC's k_cc)")
-    parser.add_argument('--k_pixel_neighbors', type=int, default=7,
-                        help="nearby pixels each center pixel is compared against, nearest "
-                             "in 2D image space and restricted to the same segment "
-                             "(DPC's k_m)")
-    parser.add_argument('--pixel_weighting', type=str, default='uniform',
-                        choices=['uniform', 'gaussian'],
-                        help="'uniform' is the default and is what DPC effectively does; "
-                             "'gaussian' only becomes meaningful once k_pixel_neighbors is "
-                             'large enough for neighbour distances to vary')
-    parser.add_argument('--alpha', type=float, default=8.0,
-                        help='gaussian weighting only; applies to normalized coordinates')
+    # Each center pixel is compared against the 8 pixels surrounding it in the
+    # image (DPC's k_m neighbourhood), restricted to the same fine segment.
+    parser.add_argument('--neighbor_stride', type=int, default=1,
+                        help='radius of the 8-pixel ring. 1 = the immediately adjacent '
+                             'pixels, which is the algorithm; larger values spread the '
+                             'neighbourhood out and are experimental only')
 
     # Optimization. Deliberately gentler than phase 1 (3000 steps at 1e-3):
     # phase 1 saw a different rendered view every step, whereas this objective is
     # fixed, so the same budget would drift much further from the checkpoint.
     parser.add_argument('--num_iters', type=int, default=300)
     parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--adam_eps', type=float, default=1e-12,
+                        help="far below torch's 1e-8 default on purpose: the gradient "
+                             'from this loss is ~1e-9 RMS, and the default eps would '
+                             "silently take Adam out of its scale-invariant regime")
     parser.add_argument('--checkpoint_every', type=int, default=25)
     parser.add_argument('--stop_at_drift', type=float, default=None,
                         help='stop early if mean cosine vs phase-1 features drops below '
@@ -300,8 +357,10 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0,
                         help='must match the phase-1 seed -- it is what restores the '
                              'Fourier basis (see load_phase1_encoder)')
+    # New directory: the 2026-08-01 run in encoder_dino_mapping/ used the wrong
+    # pixel neighbourhood, and its 18 files are kept as-is rather than clobbered.
     parser.add_argument('--out_dir', type=str,
-                        default='./experiments/guitar/encoder_dino_mapping')
+                        default='./experiments/guitar/encoder_dino_mapping_adjacent')
     args = parser.parse_args()
 
     if args.init_encoder_checkpoint is None:
