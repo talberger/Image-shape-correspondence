@@ -138,6 +138,19 @@ def load_ply_vertex_colors(ply_path):
     return colors
 
 
+def load_ply_geometry(ply_path):
+    """Vertices + faces straight out of the .ply, for files whose geometry is not
+    the .obj's own. mesh_coloring.py --mode checker writes such a file: it splits
+    every face into its own 3 vertices so each triangle can carry one flat color
+    (a shared vertex would force the renderer to blend the two cells' colors).
+    Rendering the .obj instead would silently throw that away."""
+    ply = PlyData.read(ply_path)
+    v = ply['vertex']
+    verts = np.stack([v['x'], v['y'], v['z']], axis=1).astype(np.float32)
+    faces = np.stack(ply['face'].data['vertex_index']).astype(np.int64)
+    return verts, faces
+
+
 def render_one_view(renderer, mesh, elev_deg, azim_deg):
     elev = torch.tensor([elev_deg], dtype=torch.float32).to(device) / 180 * np.pi
     azim = torch.tensor([azim_deg], dtype=torch.float32).to(device) / 360 * 2 * np.pi
@@ -156,8 +169,20 @@ def main(args):
     mesh = loadmesh(args.obj_path, name='guitar')
     vertex_colors = load_ply_vertex_colors(args.ply_path)
     if vertex_colors.shape[0] != mesh.vertices.shape[0]:
-        raise ValueError(f'{args.ply_path} has {vertex_colors.shape[0]} vertices, '
-                          f'mesh has {mesh.vertices.shape[0]}')
+        # A .ply with its own geometry (mesh_coloring.py's flat checkerboard splits
+        # every face into 3 vertices). Render what the file actually contains; the
+        # --obj_path mesh is only the default source of geometry, not a constraint.
+        # setcolor_mesh_batched normalizes whatever it is handed, so framing is
+        # unchanged.
+        ply_verts, ply_faces = load_ply_geometry(args.ply_path)
+        if ply_verts.shape[0] != vertex_colors.shape[0]:
+            raise ValueError(f'{args.ply_path} is internally inconsistent: '
+                              f'{ply_verts.shape[0]} vertices, {vertex_colors.shape[0]} colors')
+        print(f'{args.ply_path} has {vertex_colors.shape[0]} vertices vs the .obj\'s '
+              f'{mesh.vertices.shape[0]}; rendering the .ply\'s own geometry '
+              f'({ply_faces.shape[0]} faces)')
+        mesh = RenderMesh(torch.from_numpy(ply_verts).to(device),
+                          torch.from_numpy(ply_faces).to(device))
 
     if args.click_markers_path is not None:
         mesh, vertex_colors = add_click_marker_spheres(

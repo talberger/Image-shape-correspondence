@@ -154,6 +154,12 @@ def main(args):
         'top_k': args.top_k,
         'num_vertices': num_vertices,
         'mask_shape': tuple(mask.shape),
+        # Provenance: without this the file is indistinguishable from one built on
+        # a different encoder, and the only way to tell was to recompute the
+        # similarities against each candidate pred_f.pth and see which matched.
+        'vertex_features_path': args.vertex_features_path,
+        'features_path': features_path,
+        'mask_path': args.mask_path,
     }
     torch.save(output, output_path)
     print(f'saved to {output_path}')
@@ -169,8 +175,12 @@ if __name__ == '__main__':
     parser.add_argument('--mask_path', type=str,
                          default='./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth')
     parser.add_argument('--vertex_features_path', type=str,
-                         default='./demo/guitar/encoder_dino/pred_f.pth',
-                         help='per-vertex DINO features from modules/encoder.py, shape [V, F]')
+                         default='./experiments/guitar/encoder_dino/pred_f.pth',
+                         help='per-vertex DINO features from modules/encoder.py, shape [V, F]. '
+                              'Defaults to OUR phase-1 retrain. It used to default to '
+                              './demo/guitar/encoder_dino/pred_f.pth, which is the BSB authors\' '
+                              'downloaded file (download_demo_data.sh:23-24) -- everything produced '
+                              'before 2026-08-02 was therefore about their encoder, not ours.')
     parser.add_argument('--output_path', type=str, default=None,
                          help='defaults to <save_dir>/<mask_basename>_pixel_to_vertex_nn.pth')
     parser.add_argument('--top_k', type=int, default=10,
