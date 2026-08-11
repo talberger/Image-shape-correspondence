@@ -43,11 +43,29 @@ from modules.utils import write_ply
 from modules.mesh import Mesh
 
 
-def load_knn(knn_path, k):
+def check_mask_matches_knn(mask_path, knn, knn_path):
+    """pixel_to_vertex_nn.py already stores exactly which (row, col) pixels it was
+    computed from. Load the mask given now and check it marks the same pixels --
+    catches a stale knn file computed against a different/older mask (this exact
+    bug produced mismatched pixel selections across bsb_retrained/bsb_mapping_loss
+    on 2026-08-08, silently, because nothing checked this before)."""
+    mask = torch.load(mask_path, map_location='cpu')
+    mask_row, mask_col = torch.where(mask)
+    same = (mask_row.shape == knn['pixel_row'].shape
+            and torch.equal(mask_row, knn['pixel_row'])
+            and torch.equal(mask_col, knn['pixel_col']))
+    if not same:
+        raise ValueError(f'{knn_path} was computed from a different mask than --mask_path={mask_path} '
+                          f'({mask_row.shape[0]} masked pixels now vs {knn["pixel_row"].shape[0]} stored) -- '
+                          f're-run pixel_to_vertex_nn.py against the current mask')
+
+
+def load_knn(knn_path, k, mask_path):
     knn = torch.load(knn_path, map_location='cpu')
     top_k = knn['top_k']
     if not (1 <= k <= top_k):
         raise ValueError(f'k={k} must be in [1, {top_k}] (top_k stored in {knn_path})')
+    check_mask_matches_knn(mask_path, knn, knn_path)
     return knn
 
 
@@ -58,9 +76,16 @@ def load_pixel_colors(color_path, mask_shape, pixel_row, pixel_col):
     return torch.from_numpy(img[pixel_row.numpy(), pixel_col.numpy()]).float()
 
 
-def accumulate_vertex_colors(topk_vertex_idx, topk_similarity, pixel_colors, k, num_vertices):
+def accumulate_vertex_colors(topk_vertex_idx, topk_similarity, pixel_colors, k, num_vertices,
+                              softmax_temp=None):
     vertex_idx = topk_vertex_idx[:, :k].reshape(-1)
-    weight = topk_similarity[:, :k].reshape(-1)
+    sim_k = topk_similarity[:, :k]
+    if softmax_temp is not None:
+        # per-pixel softmax over its own k neighbors, so each pixel's weights sum to 1
+        # before being scattered into the vertex accumulators below.
+        weight = torch.softmax(sim_k / softmax_temp, dim=1).reshape(-1)
+    else:
+        weight = sim_k.reshape(-1)
     color = pixel_colors.unsqueeze(1).expand(-1, k, -1).reshape(-1, 3)
 
     vertex_color_sum = torch.zeros(num_vertices, 3, dtype=torch.float32)
@@ -110,7 +135,7 @@ def main(args):
     color_path = args.color_path or os.path.join(
         args.save_dir, f'{mask_basename}_{args.color_mode}_color.png')
 
-    knn = load_knn(knn_path, args.k)
+    knn = load_knn(knn_path, args.k, args.mask_path)
     num_vertices = knn['num_vertices']
     n_masked = knn['pixel_row'].shape[0]
 
@@ -168,8 +193,10 @@ def main(args):
         print(f'click markers ({args.k} nearest vertices + similarity + color per selected pixel) '
               f'saved to {click_markers_path}')
 
+    softmax_temp = args.softmax_temp if args.use_softmax else None
     vertex_color_sum, vertex_weight_sum = accumulate_vertex_colors(
-        topk_vertex_idx, topk_similarity, pixel_colors, args.k, num_vertices)
+        topk_vertex_idx, topk_similarity, pixel_colors, args.k, num_vertices,
+        softmax_temp=softmax_temp)
 
     covered = vertex_weight_sum > 0
     num_covered = int(covered.sum().item())
@@ -187,9 +214,16 @@ def main(args):
 
     n_painted = len(selected_idx) if selected_idx is not None else n_masked
     print(f'n_masked pixels: {n_masked}, n_painted from: {n_painted}, k: {args.k}')
-    used_weight = topk_similarity[:, :args.k]
-    print(f'similarity (weight) used: mean={used_weight.mean().item():.4f} '
-          f'min={used_weight.min().item():.4f} max={used_weight.max().item():.4f}')
+    raw_sim = topk_similarity[:, :args.k]
+    print(f'raw similarity: mean={raw_sim.mean().item():.4f} '
+          f'min={raw_sim.min().item():.4f} max={raw_sim.max().item():.4f}')
+    if softmax_temp is not None:
+        actual_weight = torch.softmax(raw_sim / softmax_temp, dim=1)
+        print(f'weighting: softmax(similarity / {softmax_temp:g}) per pixel over its own k neighbors '
+              f'-- weight mean={actual_weight.mean().item():.4f} min={actual_weight.min().item():.4f} '
+              f'max={actual_weight.max().item():.4f}')
+    else:
+        print('weighting: raw similarity (no softmax)')
     print(f'vertex coverage: {num_covered}/{num_vertices} vertices ({100.0 * num_covered / num_vertices:.2f}%)')
 
     write_ply(output_path, verts, faces, vertex_colors)
@@ -198,10 +232,9 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mask_path', type=str,
-                         default='./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth',
+    parser.add_argument('--mask_path', type=str, required=True,
                          help='used only to derive default paths below (same mask the pixel coloring and NN steps were run on)')
-    parser.add_argument('--save_dir', type=str, default='./demo/guitar/bsb/')
+    parser.add_argument('--save_dir', type=str, required=True)
     parser.add_argument('--knn_path', type=str, default=None,
                          help='defaults to <save_dir>/<mask_basename>_pixel_to_vertex_nn.pth (pixel_to_vertex_nn.py output)')
     parser.add_argument('--color_mode', type=str, choices=['pca', 'position'], default='pca',
@@ -215,7 +248,18 @@ if __name__ == '__main__':
                          help='defaults to <save_dir>/<mask_basename>_mesh_color_<color_mode>_k<k>.ply')
     parser.add_argument('--k', type=int, default=1,
                          help='number of nearest vertices per pixel to paint (must be <= top_k stored in the pixel_to_vertex_nn.py output)')
-    parser.add_argument('--uncovered_color', nargs=3, type=int, default=[128, 128, 128],
+    parser.add_argument('--use_softmax', action='store_true',
+                         help='instead of using each pixel\'s raw cosine similarities as weights '
+                              'directly, take softmax(similarity / --softmax_temp) over the pixel\'s '
+                              'own k neighbors first, so weights sum to 1 per pixel before scattering '
+                              'into vertices. Off by default (raw similarity weighting, original '
+                              'behavior).')
+    parser.add_argument('--softmax_temp', type=float, default=1.0,
+                         help='only used with --use_softmax. 1.0 is the neutral/standard choice '
+                              '(no extra scaling beyond the softmax itself) -- lower sharpens toward '
+                              'the single best-matching neighbor, higher flattens toward a uniform '
+                              'average over the k neighbors.')
+    parser.add_argument('--uncovered_color', nargs=3, type=int, default=[200, 200, 200],
                          help='RGB (0-255) for vertices with zero contributing pixels')
     parser.add_argument('--num_pixels', type=int, default=None,
                          help='if set, paint the mesh from only this many masked pixels instead of all of '

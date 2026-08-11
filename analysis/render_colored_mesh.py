@@ -164,7 +164,6 @@ def render_one_view(renderer, mesh, elev_deg, azim_deg):
 
 def main(args):
     ply_basename = os.path.splitext(os.path.basename(args.ply_path))[0]
-    output_path = args.output_path or os.path.join(args.save_dir, f'{ply_basename}_rendered_views.png')
 
     mesh = loadmesh(args.obj_path, name='guitar')
     vertex_colors = load_ply_vertex_colors(args.ply_path)
@@ -199,20 +198,26 @@ def main(args):
     azim_deg = args.azim_deg
     rendered = []  # [(elev, azim, img), ...] in row-major (elev outer, azim inner) order
 
-    fig, axs = plt.subplots(len(elev_deg), len(azim_deg),
-                             figsize=(len(azim_deg) * 4.5, len(elev_deg) * 4.5),
-                             squeeze=False, constrained_layout=True)
-    for i, e in enumerate(elev_deg):
-        for j, a in enumerate(azim_deg):
-            img = render_one_view(renderer, mesh, e, a)
-            rendered.append((e, a, img))
-            axs[i, j].imshow(img)
-            axs[i, j].set_title(f'elev={e:g}, azim={a:g}', fontsize=11, pad=8)
-            axs[i, j].axis('off')
+    if args.save_rendered_views_grid:
+        fig, axs = plt.subplots(len(elev_deg), len(azim_deg),
+                                 figsize=(len(azim_deg) * 4.5, len(elev_deg) * 4.5),
+                                 squeeze=False, constrained_layout=True)
+        for i, e in enumerate(elev_deg):
+            for j, a in enumerate(azim_deg):
+                img = render_one_view(renderer, mesh, e, a)
+                rendered.append((e, a, img))
+                axs[i, j].imshow(img)
+                axs[i, j].set_title(f'elev={e:g}, azim={a:g}', fontsize=11, pad=8)
+                axs[i, j].axis('off')
 
-    fig.savefig(output_path)
-    plt.close(fig)
-    print(f'rendered views saved to {output_path}')
+        output_path = args.output_path or os.path.join(args.save_dir, f'{ply_basename}_rendered_views.png')
+        fig.savefig(output_path)
+        plt.close(fig)
+        print(f'rendered views saved to {output_path}')
+    else:
+        for e in elev_deg:
+            for a in azim_deg:
+                rendered.append((e, a, render_one_view(renderer, mesh, e, a)))
 
     if args.source_image_path is not None:
         source_pil = Image.open(args.source_image_path).convert('RGB')
@@ -242,10 +247,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--ply_path', type=str, required=True,
                          help='colored mesh .ply from color_mesh_from_knn.py')
-    parser.add_argument('--save_dir', type=str, default='./demo/guitar/bsb/')
+    parser.add_argument('--save_dir', type=str, required=True)
     parser.add_argument('--obj_path', type=str, default='./meshes/guitar.obj')
+    parser.add_argument('--save_rendered_views_grid', action='store_true',
+                         help='also save the <ply_basename>_rendered_views.png labeled-grid figure. '
+                              'Off by default since --source_image_path already produces a side-by-side '
+                              'with the same views; turn on only when the grid (with elev/azim labels '
+                              'per panel) is specifically wanted.')
     parser.add_argument('--output_path', type=str, default=None,
-                         help='defaults to <save_dir>/<ply_basename>_rendered_views.png')
+                         help='rendered-views grid path, only used with --save_rendered_views_grid; '
+                              'defaults to <save_dir>/<ply_basename>_rendered_views.png')
     parser.add_argument('--render_res', type=int, default=224)
     parser.add_argument('--elev_deg', nargs='+', type=float, default=[0],
                          help='elevation angles (degrees) for the rendered views')

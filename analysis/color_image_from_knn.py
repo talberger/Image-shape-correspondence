@@ -58,11 +58,27 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis.pixel_coloring import build_output_image
 
 
-def load_knn(knn_path, k):
+def check_mask_matches_knn(mask_path, knn, knn_path):
+    """pixel_to_vertex_nn.py already stores exactly which (row, col) pixels it was
+    computed from. Load the mask given now and check it marks the same pixels --
+    catches a stale knn file computed against a different/older mask."""
+    mask = torch.load(mask_path, map_location='cpu')
+    mask_row, mask_col = torch.where(mask)
+    same = (mask_row.shape == knn['pixel_row'].shape
+            and torch.equal(mask_row, knn['pixel_row'])
+            and torch.equal(mask_col, knn['pixel_col']))
+    if not same:
+        raise ValueError(f'{knn_path} was computed from a different mask than --mask_path={mask_path} '
+                          f'({mask_row.shape[0]} masked pixels now vs {knn["pixel_row"].shape[0]} stored) -- '
+                          f're-run pixel_to_vertex_nn.py against the current mask')
+
+
+def load_knn(knn_path, k, mask_path):
     knn = torch.load(knn_path, map_location='cpu')
     top_k = knn['top_k']
     if not (1 <= k <= top_k):
         raise ValueError(f'k={k} must be in [1, {top_k}] (top_k stored in {knn_path})')
+    check_mask_matches_knn(mask_path, knn, knn_path)
     return knn
 
 
@@ -136,7 +152,7 @@ def main(args):
     knn_path = args.knn_path or os.path.join(
         args.knn_dir, f'{mask_basename}_pixel_to_vertex_nn.pth')
 
-    knn = load_knn(knn_path, args.k)
+    knn = load_knn(knn_path, args.k, args.mask_path)
     num_vertices = knn['num_vertices']
     n_masked = knn['pixel_row'].shape[0]
     if n_masked == 0:
@@ -190,11 +206,10 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mask_path', type=str,
-                         default='./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth',
+    parser.add_argument('--mask_path', type=str, required=True,
                          help='used only to derive the default --knn_path and the output filename '
                               '(the same mask pixel_to_vertex_nn.py was run on)')
-    parser.add_argument('--knn_dir', type=str, default='./demo/guitar/bsb/',
+    parser.add_argument('--knn_dir', type=str, required=True,
                          help='where to look for the pixel_to_vertex_nn.py output')
     parser.add_argument('--knn_path', type=str, default=None,
                          help='defaults to <knn_dir>/<mask_basename>_pixel_to_vertex_nn.pth')

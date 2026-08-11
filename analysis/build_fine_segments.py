@@ -121,8 +121,7 @@ def save_label_png(labels, image, out_path, alpha=0.65):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--img_path', type=str, default='./images/guitar_01.png')
-    parser.add_argument('--mask_path', type=str,
-                        default='./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth',
+    parser.add_argument('--mask_path', type=str, required=True,
                         help='coarse whole-object mask; segments are clipped to it')
     parser.add_argument('--save_dir', type=str, default='./demo/guitar/phase2/')
     parser.add_argument('--sam_dir', type=str, default='./SAM_repo/model_checkpoints/')

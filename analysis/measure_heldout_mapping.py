@@ -128,12 +128,10 @@ if __name__ == '__main__':
                         help='pred_f.pth to evaluate; phase-1 by default')
     parser.add_argument('--obj_path', type=str, default='./meshes/guitar.obj')
     parser.add_argument('--name', type=str, default='guitar')
-    parser.add_argument('--object_mask_path', type=str,
-                        default='./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth')
+    parser.add_argument('--object_mask_path', type=str, required=True)
     parser.add_argument('--fine_seg_path', type=str,
                         default='./demo/guitar/phase2/guitar_01_fine_segments.pth')
-    parser.add_argument('--pix_dino_features_path', type=str,
-                        default='./demo/guitar/bsb/guitar_01_pix_dino_features.pth')
+    parser.add_argument('--pix_dino_features_path', type=str, required=True)
 
     # These three must match the training run or "train" is not the train set.
     parser.add_argument('--num_center_pixels', type=int, default=2048)

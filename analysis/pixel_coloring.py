@@ -291,11 +291,10 @@ if __name__ == '__main__':
                               'the centre, spreading mid-radius pixels apart; >1 does the opposite.')
     parser.add_argument('--img_path', type=str, default='./images/guitar_01.png',
                          help='used only to derive the default features filename (--mode pca)')
-    parser.add_argument('--save_dir', type=str, default='./demo/guitar/bsb/')
+    parser.add_argument('--save_dir', type=str, required=True)
     parser.add_argument('--features_path', type=str, default=None,
                          help='defaults to <save_dir>/<img_name>_pix_dino_features.pth (--mode pca)')
-    parser.add_argument('--mask_path', type=str,
-                         default='./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth')
+    parser.add_argument('--mask_path', type=str, required=True)
     parser.add_argument('--output_path', type=str, default=None,
                          help='defaults to <save_dir>/<mask_basename>_<mode>_color.png')
     parser.add_argument('--n_components', type=int, default=3, help='--mode pca only')
