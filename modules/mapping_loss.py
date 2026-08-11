@@ -142,24 +142,34 @@ NEIGHBOR_OFFSETS = ((-1, -1), (-1, 0), (-1, 1),
                     (1, -1), (1, 0), (1, 1))
 
 
-def build_adjacent_neighbors(coords, segment_ids, fine_segments, stride=1):
+def build_adjacent_neighbors(coords, segment_ids, fine_segments, stride=1,
+                              require_same_segment=True):
     """For each center pixel, the 8 pixels surrounding it in the image.
 
     This is the intended pixel neighbourhood: `stride=1` gives the immediately
     adjacent pixels, a mean of (4 + 4*sqrt(2))/8 = 1.2071 px away. `stride`
-    scales the ring outward and exists only so the neighbourhood's spatial
-    extent can be varied later; it is not part of the algorithm.
+    scales the ring outward -- e.g. stride=100 is the same 8 directions, just
+    100px away instead of 1 -- and is how the repulsive far ring reuses this
+    same function (`require_same_segment=False`, large stride) instead of
+    duplicating it.
 
     Unlike `build_pixel_neighbors` these neighbours are arbitrary image pixels,
     not members of the center set, so the caller must compute a y_hat for them
     too -- see the [n*(1+k)] batching in train_mapping_loss.py.
 
-    A neighbour is valid only if it lies in the *same fine segment* as its
+    `require_same_segment` (default True, the near-ring / attractive case): a
+    neighbour is valid only if it lies in the *same fine segment* as its
     center, which keeps the loss from pulling together pixels that merely happen
     to be adjacent across a part boundary (e.g. where the neck meets the body).
     Since build_fine_segments.py ANDs every SAM mask with the coarse object mask
     before painting, `fine_segments > 0` is a strict subset of that mask, so the
     same-segment test alone already guarantees the neighbour is on the object.
+
+    `require_same_segment=False` (the far-ring / repulsive case): segment
+    membership isn't relevant for "is this pair far apart" -- a far neighbour
+    in a different segment, or the same large segment, is equally valid. A
+    neighbour is then valid as long as it's on the object at all
+    (`fine_segments > 0`, per the same coarse-mask-subset relationship above).
 
     Everything stays on CPU: the coordinates are used to index the 3.6 GB pixel
     feature file, and torch rejects a mix of CPU and CUDA index tensors.
@@ -190,7 +200,11 @@ def build_adjacent_neighbors(coords, segment_ids, fine_segments, stride=1):
          unclamped[..., 1].clamp(0, width - 1)], dim=-1)
 
     segment_at_neighbor = segments[neighbor_coords[..., 0], neighbor_coords[..., 1]]
-    neighbor_valid = ~out_of_bounds & (segment_at_neighbor == segment_ids.unsqueeze(1))
+    if require_same_segment:
+        on_object = segment_at_neighbor == segment_ids.unsqueeze(1)
+    else:
+        on_object = segment_at_neighbor > 0
+    neighbor_valid = ~out_of_bounds & on_object
 
     return neighbor_coords, neighbor_valid
 
@@ -264,6 +278,52 @@ def mapping_loss(center_points, neighbor_points, neighbor_valid):
     squared_distance = (center_points.unsqueeze(1) - neighbor_points).pow(2).sum(-1)
     valid = neighbor_valid.float()
     return (squared_distance * valid).sum() / valid.sum().clamp(min=1.0)
+
+
+def repulsion_loss(center_points, far_points, far_valid, margin):
+    """Repulsive complement to `mapping_loss()`: penalize a pixel and a *far*
+    pixel (see `build_adjacent_neighbors(..., require_same_segment=False)`)
+    whose soft-mapped points end up closer than `margin` on the mesh surface.
+
+    `L_map` alone is purely attractive -- nothing in it ever says "keep these
+    apart" -- which is the documented mechanism behind the coverage collapse
+    (every pixel's global minimum is one point, regardless of neighbours).
+    This is the missing half: same shape of call as `mapping_loss()` (center
+    vs. its ring, validity mask, global denominator), just the near ring
+    swapped for the far one and squared-distance swapped for a hinge.
+
+    Flat penalty, not scaled by how far apart the pair is in the image (that
+    is a possible refinement, not implemented here): every far pair inside
+    the margin is penalized equally.
+
+    Args:
+        center_points [n, 3]     y_hat of each center pixel (same tensor
+                                  `mapping_loss` is called with)
+        far_points    [n, 8, 3]  y_hat of each center's far-ring neighbours
+        far_valid     [n, 8]     from build_adjacent_neighbors(require_same_segment=False)
+        margin        scalar     pairs closer than this are penalized
+
+    Returns a scalar. Same "global denominator, invalid pairs contribute to
+    neither sum" convention as `mapping_loss()`, for the same reason (a
+    center near the object's edge may have few or no valid far neighbours,
+    per the coverage table in the plan this was sized against).
+
+    `mapping_loss()` gets away with plain squared distance (no sqrt) because
+    it never needs actual distance, only its gradient toward zero. This loss
+    needs true (non-squared) distance to compare against `margin`, and
+    sqrt(x)'s gradient is 1/(2*sqrt(x)) -- unbounded as x -> 0. Any far pair
+    that starts (or lands, mid-training) at ~zero distance would then blow up
+    to a NaN gradient on the very next backward pass. Confirmed by the first
+    smoke test run: grad norm was already NaN at step 1. Fixed with a small
+    epsilon inside the sqrt, the standard fix for Euclidean-distance losses
+    (same trick torch's own TripletMarginLoss uses internally).
+    """
+    eps = 1e-12
+    squared_distance = (center_points.unsqueeze(1) - far_points).pow(2).sum(-1)
+    distance = (squared_distance + eps).sqrt()
+    penalty = F.relu(margin - distance).pow(2)
+    valid = far_valid.float()
+    return (penalty * valid).sum() / valid.sum().clamp(min=1.0)
 
 
 def feature_drift(vertex_features, reference_features):
