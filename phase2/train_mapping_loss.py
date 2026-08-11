@@ -20,8 +20,8 @@ that the upstream (threedle/bsb) files stay untouched -- the same pattern the
 analysis/ scripts already follow. `git diff baseline-fixed` then shows all of our
 work without any interleaving into the original code.
 
-Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python train_mapping_loss.py
+Run (from /workspace/bsb, so `modules.*` and `phase2.*` both resolve):
+cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python -m phase2.train_mapping_loss
 
 See /workspace/FINE_TUNING_PLAN.md for the full design and the reasoning behind
 each default.
@@ -41,7 +41,7 @@ import torch.nn.functional as F
 
 from modules.encoder import Encoder
 from modules.mapping_loss import (build_adjacent_neighbors, feature_drift, mapping_loss,
-                                  sample_center_pixels, soft_map_to_vertices)
+                                  repulsion_loss, sample_center_pixels, soft_map_to_vertices)
 from modules.utils import device, load_state_dict, loadmesh
 
 # Reused from the standalone gate script so the thresholds cannot drift apart.
@@ -214,6 +214,24 @@ def train(args):
     print('  mean neighbour distance %.4f px (stride %d)'
           % (pixel_distance[neighbor_valid].mean(), args.neighbor_stride))
 
+    # Repulsive far ring -- same mechanism as the near ring (build_adjacent_neighbors),
+    # just require_same_segment=False and a much larger stride. Skipped entirely
+    # when lambda_repel is 0 (the default), so runs that don't use this are
+    # byte-for-byte the same as before this was added.
+    use_repel = args.lambda_repel > 0
+    if use_repel:
+        far_coords, far_valid = build_adjacent_neighbors(
+            coords, segment_ids, fine_segments, stride=args.far_stride,
+            require_same_segment=False)
+        num_far = far_valid.shape[1]
+        far_pixel_distance = (coords.float().unsqueeze(1) - far_coords.float()).pow(2).sum(-1).sqrt()
+        print('  far ring (stride %d): %d/%d pairs valid; %d/%d centers have >=1 valid'
+              % (args.far_stride, int(far_valid.sum()), far_valid.numel(),
+                 int((far_valid.sum(1) > 0).sum()), num_centers))
+        print('  mean far-neighbour distance %.1f px' % far_pixel_distance[far_valid].mean())
+        all_coords = torch.cat([all_coords, far_coords.reshape(-1, 2)], dim=0)
+        far_valid = far_valid.to(device)
+
     pixel_features = load_pixel_features(args.pix_dino_features_path, all_coords)
     print('  pixel features %s' % (tuple(pixel_features.shape),))
     neighbor_valid = neighbor_valid.to(device)
@@ -239,9 +257,17 @@ def train(args):
 
         soft_points = soft_map_to_vertices(
             pixel_features, vertex_features, vertices, args.k_vertices_per_pixel)
-        loss = mapping_loss(soft_points[:num_centers],
-                            soft_points[num_centers:].view(num_centers, num_neighbors, 3),
-                            neighbor_valid)
+        near_end = num_centers + num_centers * num_neighbors
+        center_points = soft_points[:num_centers]
+        map_loss = mapping_loss(center_points,
+                                soft_points[num_centers:near_end].view(num_centers, num_neighbors, 3),
+                                neighbor_valid)
+        if use_repel:
+            far_points = soft_points[near_end:].view(num_centers, num_far, 3)
+            repel_loss = repulsion_loss(center_points, far_points, far_valid, args.repel_margin)
+            loss = args.lambda_map * map_loss + args.lambda_repel * repel_loss
+        else:
+            loss = args.lambda_map * map_loss
 
         loss.backward()
 
@@ -259,8 +285,14 @@ def train(args):
             with torch.no_grad():
                 drift = feature_drift(encoder(vertices), phase1_features)
             drifts.append((step, drift))
-            print('step %4d/%d  loss %.6f  drift(cos vs phase 1) %.4f'
-                  % (step, args.num_iters, loss.item(), drift))
+            if use_repel:
+                print('step %4d/%d  loss %.6f (%.4g*map %.6f + %.4g*repel %.6f)  '
+                      'drift(cos vs phase 1) %.4f'
+                      % (step, args.num_iters, loss.item(), args.lambda_map, map_loss.item(),
+                         args.lambda_repel, repel_loss.item(), drift))
+            else:
+                print('step %4d/%d  loss %.6f (%.4g*map %.6f)  drift(cos vs phase 1) %.4f'
+                      % (step, args.num_iters, loss.item(), args.lambda_map, map_loss.item(), drift))
 
             torch.save({'encoder_state_dict': encoder.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
@@ -315,15 +347,13 @@ if __name__ == '__main__':
     parser.add_argument('--sigma', type=float, default=5.0)
 
     # Data
-    parser.add_argument('--object_mask_path', type=str,
-                        default='./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth',
+    parser.add_argument('--object_mask_path', type=str, required=True,
                         help='coarse whole-object mask; center pixels are drawn from it')
     parser.add_argument('--fine_seg_path', type=str,
                         default='./demo/guitar/phase2/guitar_01_fine_segments.pth',
                         help='part-level label map from analysis/build_fine_segments.py; '
                              'pixel neighbours are restricted to the same part')
-    parser.add_argument('--pix_dino_features_path', type=str,
-                        default='./demo/guitar/bsb/guitar_01_pix_dino_features.pth')
+    parser.add_argument('--pix_dino_features_path', type=str, required=True)
 
     # Loss. Names spell out which space each neighbourhood lives in, since that
     # distinction is the whole point (DPC calls them k_cc and k_m).
@@ -338,6 +368,23 @@ if __name__ == '__main__':
                         help='radius of the 8-pixel ring. 1 = the immediately adjacent '
                              'pixels, which is the algorithm; larger values spread the '
                              'neighbourhood out and are experimental only')
+
+    # Repulsive far ring -- complements the (purely attractive) near ring above.
+    # Off by default (lambda_repel=0): skips far-neighbor sampling entirely, so a
+    # default run is byte-for-byte what it was before this was added.
+    parser.add_argument('--lambda_repel', type=float, default=0.0,
+                        help='weight of the repulsion term; 0 (default) disables it entirely')
+    parser.add_argument('--lambda_map', type=float, default=1.0,
+                        help='weight of the (attractive) mapping loss; 1.0 (default) matches '
+                             'every run before this flag existed, byte-for-byte')
+    parser.add_argument('--far_stride', type=int, default=100,
+                        help='radius of the far 8-pixel ring, same units as --neighbor_stride '
+                             '(pixels). 100 measured to keep 98%% of centers with >=1 valid far '
+                             'neighbour on this image; larger strides drop off fast on a narrow '
+                             'shape like this guitar neck -- see the plan this was sized against')
+    parser.add_argument('--repel_margin', type=float, default=0.05,
+                        help='far pairs whose soft-mapped points are closer than this (mesh '
+                             'coordinate scale, bbox diagonal ~1.89) are penalized')
 
     # Optimization. Deliberately gentler than phase 1 (3000 steps at 1e-3):
     # phase 1 saw a different rendered view every step, whereas this objective is
