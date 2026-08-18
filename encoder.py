@@ -155,6 +155,30 @@ def test_encoder(args, sam):
     return mask_mesh_2d, len(masks)
 
 
+# --- Tal edit start ---
+def fibonacci_sphere_view(i, n_views):
+    """One (elev, azim) pair, in radians, from a Fibonacci sphere lattice -- n_views points
+    spread EVENLY BY SOLID ANGLE over the full sphere, deterministic in i (so resuming a
+    partial run just picks up at the next i, same as the original random loop's resume logic).
+
+    Why not a plain elev/azim grid: circles of constant elevation shrink by cos(elev) toward
+    the poles, so a fixed azimuth step count there crams many nearly-identical viewpoints into
+    a tiny circle (at elev=85 deg, radius is only ~9% of the equator's) -- wasted renders, not
+    genuinely even coverage. The golden-angle spacing here avoids that: elev moves smoothly
+    from +90 to -90 deg as i increases, azim advances by the golden angle (~137.5 deg) each
+    step, wrapping around without ever repeating (irrational fraction of a full turn).
+
+    elev in [-pi/2, pi/2], azim in [0, 2*pi) -- same convention render_views' own random_views
+    branch uses.
+    """
+    golden_angle = np.pi * (3 - np.sqrt(5))
+    y = 1 - (2 * i) / max(n_views - 1, 1)
+    elev = np.arcsin(np.clip(y, -1.0, 1.0))
+    azim = (i * golden_angle) % (2 * np.pi)
+    return elev, azim
+# --- Tal edit end ---
+
+
 def generate_random_views(args):
     # Constrain most sources of randomness
     torch.manual_seed(args.seed)
@@ -192,16 +216,39 @@ def generate_random_views(args):
     # Optimization loop
     for i in tqdm(len(elev_list)+np.arange(args.n_views-len(elev_list))):
 
-        # Elevation: [-pi/2, pi/2]
-        elev_rand = -np.pi/2 + torch.rand(1) * np.pi
-        # Azimuth: [0, 2pi]
-        azim_rand = torch.rand(1) * 2 * np.pi
-        target_rendered_images, elev, azim = render_high.render_views(targetmesh, num_views=1,
-                                                                    random_views = True,
-                                                                    std=args.frontview_std,
-                                                                    return_views=True,
-                                                                    lighting=True,
-                                                                    background=torch.tensor(args.background).to(device))
+        # --- Tal edit start ---
+        if args.view_sampling == 'fibonacci':
+            elev_i, azim_i = fibonacci_sphere_view(int(i), args.n_views)
+            target_rendered_images, elev, azim = render_high.render_views(targetmesh, num_views=1,
+                                                                        random_views=False,
+                                                                        center_elev=torch.tensor([elev_i], dtype=torch.float32),
+                                                                        center_azim=torch.tensor([azim_i], dtype=torch.float32),
+                                                                        std=args.frontview_std,
+                                                                        return_views=True,
+                                                                        lighting=True,
+                                                                        background=torch.tensor(args.background).to(device))
+        else:
+        # --- Tal edit end ---
+            # Elevation: [-pi/2, pi/2]
+            elev_rand = -np.pi/2 + torch.rand(1) * np.pi
+            # Azimuth: [0, 2pi]
+            azim_rand = torch.rand(1) * 2 * np.pi
+            # --- Tal edit start ---
+            # Original code parsed --frontview_center but never passed it to render_views, so
+            # random_views's Gaussian was always centered at render_views' own center_elev=0,
+            # center_azim=0 defaults (the edge, not the front -- see the azim=90 front-fix note
+            # in PROJECT_NOTES.md) no matter what --frontview_center was set to. Wired through
+            # here so --frontview_center actually takes effect. Radians (matches center_elev/
+            # center_azim's own convention -- they're added directly to a randn()*pi/std term).
+            target_rendered_images, elev, azim = render_high.render_views(targetmesh, num_views=1,
+                                                                        random_views = True,
+                                                                        center_elev=torch.tensor([args.frontview_center[0]]),
+                                                                        center_azim=torch.tensor([args.frontview_center[1]]),
+                                                                        std=args.frontview_std,
+                                                                        return_views=True,
+                                                                        lighting=True,
+                                                                        background=torch.tensor(args.background).to(device))
+            # --- Tal edit end ---
         elev_list.append(elev)
         azim_list.append(azim)
         
@@ -412,13 +459,30 @@ if __name__ == '__main__':
     parser.add_argument('--background', nargs=3, type=float, default=[1., 1., 1.])
     parser.add_argument('--frontview_std', type=float, default=4)
     parser.add_argument('--render_res', type=int, default=224)
+    # --- Tal edit start ---
+    # Radians, [center_elev, center_azim]. Originally dead (parsed but never passed to
+    # render_views -- see the fix in generate_random_views' random_views branch below);
+    # default [0., 0.] is unchanged (still the edge, not the front, for byte-identical
+    # behavior when unset). True front is azim=pi/2 (~1.5708) at elev=0 -- verified
+    # empirically, see PROJECT_NOTES.md.
     parser.add_argument('--frontview_center', nargs=2, type=float, default=[0., 0.])
+    # --- Tal edit end ---
     parser.add_argument('--mesh_color', nargs=3, type=float, default=[2./3., 2./3., 2./3.])
     parser.add_argument('--test_elev_deg', type=int, default=0)
     parser.add_argument('--test_azim_deg', type=int, default=240)
 
     # Data
     parser.add_argument('--n_views', type=int, default=1000)
+    # --- Tal edit start ---
+    parser.add_argument('--view_sampling', type=str, default='random', choices=['random', 'fibonacci'],
+                        help="'random' (default, unchanged): Itai's original scheme -- gaussian "
+                             "around the front view (elev/azim = randn()*{pi,2pi}/frontview_std), "
+                             "not spread over the sphere. 'fibonacci': Tal's addition, 2026-08-15 "
+                             "-- n_views points spread EVENLY BY SOLID ANGLE over the full sphere "
+                             "via a Fibonacci lattice (golden-angle spacing), see "
+                             "fibonacci_sphere_view() below for why this beats a plain elev/azim "
+                             "grid (which bunches samples near the poles).")
+    # --- Tal edit end ---
     parser.add_argument('--data_percentage', type=float, default=1.0)
     parser.add_argument('--batch_size', type=int, default=1)
     

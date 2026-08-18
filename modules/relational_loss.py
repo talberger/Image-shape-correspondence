@@ -234,7 +234,8 @@ def sample_out_segment_neighbors(coords, segment_ids, seg_idx, k=8, max_retries=
 
 
 def relational_loss(center_points, neighbor_points, center_coords, neighbor_coords,
-                    mu_3D_reference=None, huber_delta=1.0, eps=1e-12):
+                    mu_3D_reference=None, mu_2D_reference=None, distance_weight=None,
+                    mu_3d_scale=1.0, huber_delta=1.0, eps=1e-12):
     """Penalize pixel-space distance and mesh-space distance for not being
     proportional, in either direction -- close-in-image-but-far-on-mesh and
     far-in-image-but-close-on-mesh are both penalized, continuously, replacing
@@ -272,10 +273,35 @@ def relational_loss(center_points, neighbor_points, center_coords, neighbor_coor
         drift than a fresh random draw each time. See
         train_relational_loss.py's `--fixed_neighbors`/`--live_mu_3d` flags.
 
-    `mu_2D` stays a live per-step mean regardless of mode (no equivalent
-    problem: pixel coordinates are fixed data, not something the training
-    loop can drift -- measured stable at ~310px across the entire 300-step
-    run that collapsed).
+    `mu_2D_reference` is the same idea applied to `d_2D`'s divisor (`None` =
+    LIVE per-step mean, a float = FIXED constant). Unlike `mu_3D_reference`,
+    `d_2D`'s live mean was never a *drift* risk on its own (pixel coordinates
+    are fixed data, not something the training loop can move -- measured
+    stable at ~310px across the entire 300-step run that collapsed). The
+    reason to fix it anyway (2026-08-11, Tal's proposal): both `mu_2D` and
+    `mu_3D_live`/`mu_3D_reference` as computed above are a MEAN OVER THE
+    SAMPLED PAIRS THAT STEP -- and center pixels are drawn uniformly over the
+    object's pixels (`sample_center_pixels`), so a segment's share of the
+    2048 centers is proportional to its pixel count. On this mesh that's
+    wildly uneven (measured directly: body segment 66.5% -> ~1362 expected
+    centers, neck 16.7% -> ~342, headstock 4.5% -> ~92 out of 2048) -- so
+    even the "fixed" `mu_3D_reference` mode is really a fixed value that was
+    itself measured mostly from body/neck pairs, and a small segment like the
+    headstock has to satisfy a ratio calibrated for a different part of the
+    object entirely. A per-step or per-run MEAN can't fix this, no matter how
+    it's stabilized, because the imbalance is baked into which pairs get
+    sampled in the first place.
+
+    `mu_2D_reference`/`mu_3D_reference` given together as fixed BOUNDING-BOX
+    DIAGONALS (`train_relational_loss.py`'s `--bbox_norm`: pixel-space bbox
+    diagonal of the coarse mask, mesh-space bbox diagonal of `vertices`) sidestep
+    that failure mode entirely -- neither is a statistic over sampled pairs at
+    all, just a fixed property of the whole object's geometry, computed once,
+    identical regardless of which pixels happen to get drawn as centers or
+    neighbours that step. This is the standard convention for reconciling
+    image-space and shape-space scale in the literature (e.g. NOCS's
+    unit-cube canonicalization, CVPR 2019) -- a fixed geometric normalizer,
+    not a live or sampled-mean one.
 
     `d_3D` reuses `repulsion_loss`'s `sqrt(x + eps)` stabilization: it sits on
     the gradient path (center_points/neighbor_points come from the live
@@ -291,6 +317,41 @@ def relational_loss(center_points, neighbor_points, center_coords, neighbor_coor
         neighbor_coords  [n, k, 2]  pixel (row, col) of each neighbour
         mu_3D_reference  float or None  FIXED normalizer if a float; LIVE
                                      (this step's own mean) if None -- see above
+        mu_2D_reference  float or None  same, for d_2D's divisor
+        distance_weight  None, 'far', or 'near'  reweight the per-pair Huber
+                                     residual by norm_d_2D before averaging,
+                                     instead of every sampled pair counting
+                                     equally (None, the default, unchanged
+                                     behavior). 'far': weight = norm_d_2D --
+                                     pairs distant in the image get more say
+                                     in the loss. 'near': weight =
+                                     1/norm_d_2D (floored) -- the opposite.
+                                     Both use norm_d_2D specifically (not
+                                     norm_d_3D) because it is the one side of
+                                     the pair that is genuinely fixed data --
+                                     "near" and "far" are properties of the
+                                     photo, not something the loss should get
+                                     to redefine by moving d_3D around.
+        mu_3d_scale      float      divides norm_d_3D by this AFTER normalization
+                                     (1.0, the default, is a no-op). Mathematically
+                                     identical to multiplying mu_3D_reference (or
+                                     mu_3D_live) by this same value -- it does not
+                                     add a new kind of normalization, it rescales
+                                     whichever one is already in use. The point:
+                                     Tal's 2026-08-12 hypothesis that the model is
+                                     converging its mapped points too close together
+                                     (the headstock-drift family of problems). A
+                                     scale > 1 shrinks norm_d_3D for a GIVEN model
+                                     output, which raises the effective target --
+                                     to still satisfy norm_d_3D/mu_3d_scale ~=
+                                     norm_d_2D, the model has to produce LARGER raw
+                                     3D distances between mapped points than it
+                                     would without this scale, i.e. push them
+                                     further apart. Kept as an explicit separate
+                                     knob (not folded into mu_3D_reference itself)
+                                     so --bbox_norm's reference stays an honest,
+                                     literal bounding-box diagonal, sweepable
+                                     independently of this multiplier.
         huber_delta      float      Huber transition point on the normalized-
                                      distance residual; 1.0 is RKD's own fixed
                                      choice, not just a default to tune away
@@ -317,11 +378,191 @@ def relational_loss(center_points, neighbor_points, center_coords, neighbor_coor
     mu_2D = d_2D.mean().detach()
     mu_3D_live = d_3D.mean().detach()
 
-    norm_d_2D = d_2D / mu_2D.clamp(min=1e-8)
+    if mu_2D_reference is None:
+        norm_d_2D = d_2D / mu_2D.clamp(min=1e-8)
+    else:
+        norm_d_2D = d_2D / max(mu_2D_reference, 1e-8)
     if mu_3D_reference is None:
         norm_d_3D = d_3D / mu_3D_live.clamp(min=1e-8)
     else:
         norm_d_3D = d_3D / max(mu_3D_reference, 1e-8)
+    if mu_3d_scale != 1.0:
+        norm_d_3D = norm_d_3D / mu_3d_scale
+
+    if distance_weight is None:
+        loss = F.huber_loss(norm_d_3D, norm_d_2D, delta=huber_delta, reduction='mean')
+    else:
+        per_pair = F.huber_loss(norm_d_3D, norm_d_2D, delta=huber_delta, reduction='none')
+        if distance_weight == 'far':
+            weight = norm_d_2D.detach()
+        elif distance_weight == 'near':
+            # Floored, not a raw reciprocal: an unfloored 1/norm_d_2D lets a
+            # single near-zero-distance pair (a real possibility -- in- and
+            # out-of-segment neighbours can land a few pixels apart) blow up
+            # to dominate the whole batch. 0.1 caps the max weight at 10x,
+            # the mirror image of 'far' pairs naturally topping out under
+            # ~4x (the sampled pool's own max distance / mu_2D).
+            weight = 1.0 / norm_d_2D.detach().clamp(min=0.1)
+        else:
+            raise ValueError("distance_weight must be None, 'far', or 'near', got %r"
+                             % (distance_weight,))
+        loss = (weight * per_pair).sum() / weight.sum().clamp(min=1e-8)
+
+    return loss, mu_2D.item(), mu_3D_live.item()
+
+
+# ---------------------------------------------------------------------------
+# Geodesic variant (2026-08-13): both d_2D and d_3D become geodesic distances
+# instead of Euclidean -- 2D constrained to travel through the mask (any
+# segment, not just the center's own), 3D constrained to the mesh surface.
+# Full design discussion (why a naive Euclidean->geodesic swap silently kills
+# the gradient, the SHIC-inspired fix, the heat-method undershoot/mask-
+# disconnection bugs found while precomputing the tables) is in
+# PROJECT_NOTES.md, 2026-08-13. Summary of the key point:
+#
+# `relational_loss()` above computes d_3D directly between two already-
+# collapsed points (center_points/neighbor_points, each a softmax-weighted
+# AVERAGE of top-K vertex positions) -- valid for Euclidean distance, which is
+# a smooth closed-form function of any two points in R^3, on- or off-surface.
+# Geodesic distance has no such closed-form: it is a shortest-path quantity
+# defined only for points ON the surface, and the collapsed points generally
+# are not on it. Hard-snapping each collapsed point to its nearest vertex and
+# looking up a precomputed table would "work" numerically, but the snap is a
+# discrete/non-differentiable operation -- d_3D would carry ZERO gradient
+# back to the encoder, silently (no NaN, no collapse signal, just a dead loss
+# term).
+#
+# Fix: never collapse to a single point at all for the geodesic side. Keep
+# each pixel's own top-K vertex indices AND softmax weights (from
+# soft_map_to_vertices(..., return_topk=True)) and compute an EXPECTED
+# geodesic distance -- a weighted sum over all K*K (center-candidate,
+# neighbour-candidate) vertex pairs, looked up in a table that is fixed data
+# (computed once, before training, analysis/build_geodesic_tables.py). Every
+# individual geo_table entry is a constant; only the weights multiplying them
+# are differentiable (softmax over similarity, same as always) -- exactly the
+# role vertex_positions plays in the Euclidean path above, and exactly the
+# mechanism SHIC's own L_dist uses (gradient through p(x|u,I), not through
+# the geodesic values themselves).
+# ---------------------------------------------------------------------------
+
+
+def expected_geodesic_distance_3d(center_topk_idx, center_weights, neighbor_topk_idx,
+                                  neighbor_weights, geo_table_3d):
+    """Weighted-expectation geodesic distance between a center pixel and each of its k
+    neighbours, without ever collapsing either side to a single (generally off-surface,
+    non-differentiable-to-snap) point -- see this module's geodesic-variant docstring above.
+
+    d_3D_geo[i, j] = sum_a sum_b center_weights[i, a] * neighbor_weights[i, j, b]
+                          * geo_table_3d[center_topk_idx[i, a], neighbor_topk_idx[i, j, b]]
+
+    Args:
+        center_topk_idx    long  [n, K]     each center's top-K feature-nearest vertex ids
+        center_weights     float [n, K]     softmax weights over those K (from soft_map_to_vertices)
+        neighbor_topk_idx  long  [n, k, K]  each neighbour's own top-K vertex ids
+        neighbor_weights   float [n, k, K]  softmax weights over those K
+        geo_table_3d       float [V, V]     precomputed vertex-to-vertex geodesic distance
+                                             (analysis/build_geodesic_tables.py) -- CONSTANT,
+                                             no gradient needed/expected through this argument
+
+    Returns [n, k] float, on the gradient path via center_weights/neighbor_weights only.
+    """
+    n, K = center_topk_idx.shape
+    k = neighbor_topk_idx.shape[1]
+
+    # Gather every (a, b) vertex-pair's table entry -- [n, k, K, K] -- via ordinary fancy
+    # indexing (both index tensors broadcast to the same shape, elementwise gather). K=10 by
+    # convention (matches --k_vertices_per_pixel everywhere else in this project), so this is
+    # n*k*K*K = 2048*16*10*10 ~= 3.3M elements (~13MB float32) -- not the "entire V rows"
+    # allocation a naive gather-then-select would produce.
+    center_idx_exp = center_topk_idx.view(n, 1, K, 1).expand(n, k, K, K)
+    neighbor_idx_exp = neighbor_topk_idx.view(n, k, 1, K).expand(n, k, K, K)
+    gathered = geo_table_3d[center_idx_exp, neighbor_idx_exp]                 # [n, k, K, K]
+
+    weight_outer = center_weights.view(n, 1, K, 1) * neighbor_weights.view(n, k, 1, K)  # [n, k, K, K]
+    return (gathered * weight_outer).sum(dim=(-1, -2))                        # [n, k]
+
+
+def geodesic_distance_2d_lookup(neighbor_coords, geo_table_2d_center_rows, pixel_to_node):
+    """Direct table lookup, no computation, no gradient -- pixel coordinates are fixed data
+    (same reasoning `relational_loss()`'s d_2D already relies on: "d_2D carries no gradient,
+    coordinates are fixed pixel positions"), so unlike the 3D side there is no differentiability
+    problem to solve here at all, only a lookup.
+
+    Args:
+        neighbor_coords          long [n, k, 2]  (row, col) of each neighbour, CPU
+        geo_table_2d_center_rows float [n, M]    each of THIS BATCH's centers' own row already
+                                                  selected out of the full [num_centers, M] table
+                                                  (see relational_loss_geodesic -- centers are
+                                                  fixed for the whole run, so this is the same
+                                                  n rows every call, but selecting it here keeps
+                                                  this function a pure lookup, not knowing about
+                                                  center identity/ordering itself)
+        pixel_to_node             long [H, W]    (row, col) -> compact column index into the
+                                                  table, -1 for off-mask pixels (from
+                                                  analysis/build_geodesic_tables.py)
+
+    Returns [n, k] float.
+    """
+    node_idx = pixel_to_node[neighbor_coords[..., 0], neighbor_coords[..., 1]]  # [n, k]
+    if (node_idx < 0).any():
+        raise ValueError('a sampled neighbour pixel has no entry in the geodesic-safe mask '
+                         '(pixel_to_node == -1) -- sample_out_segment_neighbors/'
+                         'sample_in_segment_neighbors must be drawing against the SAME '
+                         'geodesic_safe_mask the 2D table was built from, not the raw coarse '
+                         'mask, or a disconnected speck pixel can get sampled again')
+    n, k = node_idx.shape
+    return geo_table_2d_center_rows.gather(1, node_idx)
+
+
+def relational_loss_geodesic(center_topk_idx, center_weights, neighbor_topk_idx, neighbor_weights,
+                             neighbor_coords, geo_table_3d, geo_table_2d_center_rows, pixel_to_node,
+                             mu_3D_reference, mu_2D_reference, mu_3d_scale=1.0, huber_delta=1.0):
+    """Geodesic counterpart of relational_loss() above -- same Huber-on-normalized-ratios
+    structure, same mu_3d_scale/huber_delta roles, but both distances are geodesic (see this
+    module's geodesic-variant docstring) instead of Euclidean, and normalization is against
+    geodesic diameters (max pairwise geodesic distance) rather than Euclidean bbox diagonals --
+    Tal's explicit call, matching SHIC's own convention of normalizing by the max geodesic
+    distance on the mesh, given the distances themselves are now geodesic too. Unlike
+    relational_loss(), `mu_3D_reference`/`mu_2D_reference` are REQUIRED here (no LIVE/None mode):
+    this variant was only ever designed and run with the fixed-geodesic-diameter normalization
+    Tal chose, so there is no verified LIVE behavior to silently fall back to.
+
+    Args:
+        center_topk_idx, center_weights, neighbor_topk_idx, neighbor_weights: see
+            expected_geodesic_distance_3d
+        neighbor_coords            long [n, k, 2]  see geodesic_distance_2d_lookup
+        geo_table_3d                float [V, V]
+        geo_table_2d_center_rows    float [n, M]    see geodesic_distance_2d_lookup
+        pixel_to_node               long [H, W]
+        mu_3D_reference, mu_2D_reference  float, required -- geodesic diameters
+        mu_3d_scale, huber_delta   see relational_loss()
+
+    Returns (loss, mu_2D_live, mu_3D_live): the scalar loss, plus this step's own actual mean
+    geodesic distances in each space (logging only, matching relational_loss()'s mu_3D_live --
+    watching these drift is exactly the signal that exposed the original Euclidean-mode collapse).
+    """
+    if mu_3D_reference is None or mu_2D_reference is None:
+        raise ValueError('relational_loss_geodesic requires both mu_3D_reference and '
+                         'mu_2D_reference (fixed geodesic diameters) -- there is no LIVE mode '
+                         'here, unlike relational_loss()')
+
+    d_3D = expected_geodesic_distance_3d(center_topk_idx, center_weights,
+                                         neighbor_topk_idx, neighbor_weights, geo_table_3d)
+    # 2D lookup stays on CPU throughout (neighbor_coords/geo_table_2d_center_rows/pixel_to_node
+    # are all CPU -- the table is 1.69GB, no reason to duplicate it onto the GPU just to index
+    # it, same reasoning relational_loss()'s own d_2D CPU-first handling already follows) --
+    # only the small [n, k] RESULT crosses to the encoder's device, to combine with d_3D below.
+    d_2D = geodesic_distance_2d_lookup(
+        neighbor_coords, geo_table_2d_center_rows, pixel_to_node).to(center_weights.device)
+
+    mu_2D_live = d_2D.mean().detach()
+    mu_3D_live = d_3D.mean().detach()
+
+    norm_d_2D = d_2D / max(mu_2D_reference, 1e-8)
+    norm_d_3D = d_3D / max(mu_3D_reference, 1e-8)
+    if mu_3d_scale != 1.0:
+        norm_d_3D = norm_d_3D / mu_3d_scale
 
     loss = F.huber_loss(norm_d_3D, norm_d_2D, delta=huber_delta, reduction='mean')
-    return loss, mu_2D.item(), mu_3D_live.item()
+
+    return loss, mu_2D_live.item(), mu_3D_live.item()

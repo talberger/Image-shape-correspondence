@@ -19,6 +19,19 @@ cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python \
   analysis/export_pred_f.py \
   --checkpoint ./experiments/guitar/encoder_dino_mapping/encoder_checkpoint_step150.pth \
   --output ./experiments/guitar/encoder_dino_mapping/pred_f_step150.pth
+
+BATCH MODE (--checkpoints/--outputs, 2026-08-12): a run's own step_progression_grid
+analysis calls this script once per checkpoint (typically 12), and every one of
+those calls repeats the same mesh load (loadmesh(..., load_rings=True), which builds
+a ring dictionary in a Python loop over every vertex) and Encoder(...) construction --
+identical work every time, since only the checkpoint (its state_dict + stored Fourier
+basis) actually differs between calls. Measured at ~25s/checkpoint, ~5 minutes total
+for 12 checkpoints in single-file mode. Batch mode does the mesh load and Encoder
+construction ONCE, then loops only over load_state_dict + the forward pass -- mirrors
+pixel_to_vertex_nn.py's own --vertex_features_paths/--output_paths batch mode, same
+reasoning. Single-checkpoint mode below is byte-for-byte unchanged; batch mode is
+additive, verified to produce identical pred_f tensors (torch.equal) to running this
+script once per checkpoint.
 """
 import argparse
 import os
@@ -32,10 +45,53 @@ from analysis.verify_encoder_resume import seed_everything
 from modules.encoder import Encoder
 from modules.utils import device, load_state_dict, loadmesh
 
+
+def export_one(encoder, mesh, checkpoint_path, output_path):
+    """Load one checkpoint's weights + Fourier basis onto an already-constructed
+    `encoder`/`mesh` (both checkpoint-independent), forward, save. Factored out so
+    single-checkpoint mode and batch mode share identical logic -- single mode is
+    just a batch of size 1, not a separately maintained copy."""
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    load_state_dict(encoder, checkpoint['encoder_state_dict'])
+
+    basis = checkpoint.get('fourier_basis')
+    if basis is not None:
+        encoder.mlp[0]._B = basis
+        print('restored Fourier basis from the checkpoint')
+    else:
+        print('checkpoint has no stored Fourier basis; relying on seed to '
+              'reproduce it (valid for phase-1 checkpoints)')
+
+    with torch.no_grad():
+        pred_f = encoder(mesh.vertices)
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    torch.save(pred_f, output_path)
+
+    step = checkpoint.get('step')
+    drift = checkpoint.get('drift')
+    print('exported %s from %s%s%s'
+          % (tuple(pred_f.shape), os.path.basename(checkpoint_path),
+             '' if step is None else ' (step %d' % step,
+             '' if step is None else (')' if drift is None else ', drift %.4f)' % drift)))
+    print('saved %s' % output_path)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--checkpoint', type=str, required=True)
-    parser.add_argument('--output', type=str, required=True)
+    parser.add_argument('--checkpoint', type=str, default=None,
+                        help='required unless using batch mode (--checkpoints/--outputs)')
+    parser.add_argument('--output', type=str, default=None,
+                        help='required unless using batch mode (--checkpoints/--outputs)')
+    parser.add_argument('--checkpoints', type=str, default=None,
+                        help='BATCH MODE: comma-separated checkpoint paths (e.g. every step of one '
+                             'training run) to export, sharing ONE mesh load + Encoder construction '
+                             'instead of repeating it per checkpoint. All must share the same --seed/'
+                             '--depth/--width/--n_classes/--positional_encoding/--sigma/--obj_path -- '
+                             'true for every checkpoint of one training run. Must be paired 1:1 with '
+                             '--outputs. Mutually exclusive with --checkpoint/--output.')
+    parser.add_argument('--outputs', type=str, default=None,
+                        help='BATCH MODE: comma-separated output paths, 1:1 with --checkpoints.')
     parser.add_argument('--obj_path', type=str, default='./meshes/guitar.obj')
     parser.add_argument('--name', type=str, default='guitar')
     # Must match the training run that produced the checkpoint.
@@ -47,6 +103,24 @@ if __name__ == '__main__':
     parser.add_argument('--sigma', type=float, default=5.0)
     args = parser.parse_args()
 
+    if args.checkpoints or args.outputs:
+        if not (args.checkpoints and args.outputs):
+            parser.error('--checkpoints and --outputs must both be given together')
+        if args.checkpoint or args.output:
+            parser.error('--checkpoints/--outputs (batch mode) is mutually exclusive with '
+                         '--checkpoint/--output')
+        checkpoint_paths = args.checkpoints.split(',')
+        output_paths = args.outputs.split(',')
+        if len(checkpoint_paths) != len(output_paths):
+            parser.error(f'--checkpoints has {len(checkpoint_paths)} entries but --outputs has '
+                         f'{len(output_paths)} -- must match 1:1')
+    else:
+        if not (args.checkpoint and args.output):
+            parser.error('--checkpoint and --output are required unless using batch mode '
+                         '(--checkpoints/--outputs)')
+        checkpoint_paths = [args.checkpoint]
+        output_paths = [args.output]
+
     mesh = loadmesh(dir=args.obj_path, name=args.name, load_rings=True)
 
     seed_everything(args.seed)
@@ -54,27 +128,7 @@ if __name__ == '__main__':
                       positional_encoding=args.positional_encoding,
                       sigma=args.sigma, network_verbose=0).to(device)
 
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    load_state_dict(encoder, checkpoint['encoder_state_dict'])
-
-    basis = checkpoint.get('fourier_basis')
-    if basis is not None:
-        encoder.mlp[0]._B = basis
-        print('restored Fourier basis from the checkpoint')
-    else:
-        print('checkpoint has no stored Fourier basis; relying on seed=%d to '
-              'reproduce it (valid for phase-1 checkpoints)' % args.seed)
-
-    with torch.no_grad():
-        pred_f = encoder(mesh.vertices)
-
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    torch.save(pred_f, args.output)
-
-    step = checkpoint.get('step')
-    drift = checkpoint.get('drift')
-    print('exported %s from %s%s%s'
-          % (tuple(pred_f.shape), os.path.basename(args.checkpoint),
-             '' if step is None else ' (step %d' % step,
-             '' if step is None else (')' if drift is None else ', drift %.4f)' % drift)))
-    print('saved %s' % args.output)
+    for i, (checkpoint_path, output_path) in enumerate(zip(checkpoint_paths, output_paths)):
+        if len(checkpoint_paths) > 1:
+            print(f'=== batch {i + 1}/{len(checkpoint_paths)}: {checkpoint_path} -> {output_path} ===')
+        export_one(encoder, mesh, checkpoint_path, output_path)

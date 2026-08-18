@@ -30,6 +30,19 @@ cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/render_c
   --ply_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_mesh_color_pca_k1_pix_random5_seed0.ply \
   --source_image_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_mesh_color_pca_k1_pix_random5_seed0_clicked_pixels.png \
   --click_markers_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_mesh_color_pca_k1_pix_random5_seed0_click_markers.pth
+
+BATCH MODE (--ply_paths/--save_dirs/..., 2026-08-12): a run's own step_progression_grid
+analysis calls this script once per checkpoint (typically 12), and every call repeats
+loadmesh(args.obj_path) (base geometry -- identical across checkpoints) and
+Renderer(dim=...) construction (camera/rasterizer setup -- also identical: Renderer takes
+the mesh as an argument to render_views(), not at construction, so it holds no
+mesh-specific state and is safe to reuse across the differently-shaped meshes each
+checkpoint's click-marker spheres produce). Measured at ~50s/checkpoint (this + its
+color_mesh_from_knn.py call), the dominant cost of the whole per-checkpoint analysis.
+Batch mode builds `mesh`/`renderer` ONCE, then loops only over
+load_ply_vertex_colors + coloring + rendering + saving per checkpoint. Single-.ply mode
+below is byte-for-byte unchanged; batch mode is additive, verified to produce pixel-
+identical PNGs to running this script once per checkpoint.
 """
 
 import argparse
@@ -162,65 +175,69 @@ def render_one_view(renderer, mesh, elev_deg, azim_deg):
     return images[0].permute(1, 2, 0).detach().cpu().numpy()
 
 
-def main(args):
-    ply_basename = os.path.splitext(os.path.basename(args.ply_path))[0]
+def render_one(mesh, renderer, ply_path, save_dir, elev_deg, azim_deg, save_rendered_views_grid,
+              output_path, source_image_path, side_by_side_path, click_markers_path,
+              marker_sphere_radius, marker_sphere_resolution, marker_min_radius_frac):
+    """One .ply -> rendered image(s) [+ side-by-side], given an already-constructed
+    `mesh` (base geometry, checkpoint-independent) and `renderer` (camera/rasterizer,
+    also checkpoint-independent -- see the module docstring's BATCH MODE note for why
+    both are safe to reuse across calls). Factored out so single-.ply mode and batch
+    mode share identical logic -- single mode is just a batch of size 1, not a
+    separately maintained copy."""
+    ply_basename = os.path.splitext(os.path.basename(ply_path))[0]
 
-    mesh = loadmesh(args.obj_path, name='guitar')
-    vertex_colors = load_ply_vertex_colors(args.ply_path)
+    vertex_colors = load_ply_vertex_colors(ply_path)
+    render_mesh = mesh
     if vertex_colors.shape[0] != mesh.vertices.shape[0]:
         # A .ply with its own geometry (mesh_coloring.py's flat checkerboard splits
         # every face into 3 vertices). Render what the file actually contains; the
         # --obj_path mesh is only the default source of geometry, not a constraint.
         # setcolor_mesh_batched normalizes whatever it is handed, so framing is
         # unchanged.
-        ply_verts, ply_faces = load_ply_geometry(args.ply_path)
+        ply_verts, ply_faces = load_ply_geometry(ply_path)
         if ply_verts.shape[0] != vertex_colors.shape[0]:
-            raise ValueError(f'{args.ply_path} is internally inconsistent: '
+            raise ValueError(f'{ply_path} is internally inconsistent: '
                               f'{ply_verts.shape[0]} vertices, {vertex_colors.shape[0]} colors')
-        print(f'{args.ply_path} has {vertex_colors.shape[0]} vertices vs the .obj\'s '
+        print(f'{ply_path} has {vertex_colors.shape[0]} vertices vs the .obj\'s '
               f'{mesh.vertices.shape[0]}; rendering the .ply\'s own geometry '
               f'({ply_faces.shape[0]} faces)')
-        mesh = RenderMesh(torch.from_numpy(ply_verts).to(device),
-                          torch.from_numpy(ply_faces).to(device))
+        render_mesh = RenderMesh(torch.from_numpy(ply_verts).to(device),
+                                 torch.from_numpy(ply_faces).to(device))
 
-    if args.click_markers_path is not None:
-        mesh, vertex_colors = add_click_marker_spheres(
-            mesh, vertex_colors, args.click_markers_path,
-            sphere_radius=args.marker_sphere_radius, sphere_resolution=args.marker_sphere_resolution,
-            min_radius_frac=args.marker_min_radius_frac)
+    if click_markers_path is not None:
+        render_mesh, vertex_colors = add_click_marker_spheres(
+            render_mesh, vertex_colors, click_markers_path,
+            sphere_radius=marker_sphere_radius, sphere_resolution=marker_sphere_resolution,
+            min_radius_frac=marker_min_radius_frac)
 
     vertex_colors_t = torch.from_numpy(vertex_colors).float().to(device)
-    setcolor_mesh_batched(mesh, vertex_colors_t.unsqueeze(0))
+    setcolor_mesh_batched(render_mesh, vertex_colors_t.unsqueeze(0))
 
-    renderer = Renderer(dim=(args.render_res, args.render_res))
-
-    elev_deg = args.elev_deg
-    azim_deg = args.azim_deg
     rendered = []  # [(elev, azim, img), ...] in row-major (elev outer, azim inner) order
 
-    if args.save_rendered_views_grid:
+    if save_rendered_views_grid:
         fig, axs = plt.subplots(len(elev_deg), len(azim_deg),
                                  figsize=(len(azim_deg) * 4.5, len(elev_deg) * 4.5),
                                  squeeze=False, constrained_layout=True)
         for i, e in enumerate(elev_deg):
             for j, a in enumerate(azim_deg):
-                img = render_one_view(renderer, mesh, e, a)
+                img = render_one_view(renderer, render_mesh, e, a)
                 rendered.append((e, a, img))
                 axs[i, j].imshow(img)
                 axs[i, j].set_title(f'elev={e:g}, azim={a:g}', fontsize=11, pad=8)
                 axs[i, j].axis('off')
 
-        output_path = args.output_path or os.path.join(args.save_dir, f'{ply_basename}_rendered_views.png')
-        fig.savefig(output_path)
+        views_output_path = output_path or os.path.join(save_dir, f'{ply_basename}_rendered_views.png')
+        fig.savefig(views_output_path)
         plt.close(fig)
-        print(f'rendered views saved to {output_path}')
+        print(f'rendered views saved to {views_output_path}')
     else:
         for e in elev_deg:
             for a in azim_deg:
-                rendered.append((e, a, render_one_view(renderer, mesh, e, a)))
+                rendered.append((e, a, render_one_view(renderer, render_mesh, e, a)))
 
-    if args.source_image_path is not None:
-        source_pil = Image.open(args.source_image_path).convert('RGB')
+    if source_image_path is not None:
+        source_pil = Image.open(source_image_path).convert('RGB')
         target_h = source_pil.height
 
         panels = [source_pil]
@@ -237,17 +254,68 @@ def main(args):
             combined.paste(p, (x, 0))
             x += p.width
 
-        side_by_side_path = args.side_by_side_path or os.path.join(
-            args.save_dir, f'{ply_basename}_side_by_side.png')
-        combined.save(side_by_side_path)
-        print(f'side-by-side (source image | {len(rendered)} rendered views) saved to {side_by_side_path}')
+        resolved_side_by_side_path = side_by_side_path or os.path.join(
+            save_dir, f'{ply_basename}_side_by_side.png')
+        combined.save(resolved_side_by_side_path)
+        print(f'side-by-side (source image | {len(rendered)} rendered views) saved to '
+              f'{resolved_side_by_side_path}')
+
+
+def main(args):
+    mesh = loadmesh(args.obj_path, name='guitar')
+    renderer = Renderer(dim=(args.render_res, args.render_res))
+
+    if args.ply_paths:
+        n = len(args.ply_paths)
+
+        def item(lst, i):
+            return lst[i] if lst else None
+
+        for i in range(n):
+            if n > 1:
+                print(f'=== batch {i + 1}/{n}: {args.ply_paths[i]} ===')
+            render_one(mesh, renderer, args.ply_paths[i], args.save_dirs[i],
+                      args.elev_deg, args.azim_deg, args.save_rendered_views_grid,
+                      item(args.output_paths, i), item(args.source_image_paths, i),
+                      item(args.side_by_side_paths, i), item(args.click_markers_paths, i),
+                      args.marker_sphere_radius, args.marker_sphere_resolution,
+                      args.marker_min_radius_frac)
+    else:
+        render_one(mesh, renderer, args.ply_path, args.save_dir, args.elev_deg, args.azim_deg,
+                  args.save_rendered_views_grid, args.output_path, args.source_image_path,
+                  args.side_by_side_path, args.click_markers_path, args.marker_sphere_radius,
+                  args.marker_sphere_resolution, args.marker_min_radius_frac)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ply_path', type=str, required=True,
-                         help='colored mesh .ply from color_mesh_from_knn.py')
-    parser.add_argument('--save_dir', type=str, required=True)
+    parser.add_argument('--ply_path', type=str, default=None,
+                         help='colored mesh .ply from color_mesh_from_knn.py. Required unless using '
+                              'batch mode (--ply_paths).')
+    parser.add_argument('--save_dir', type=str, default=None,
+                         help='Required unless using batch mode (--ply_paths/--save_dirs).')
+    parser.add_argument('--ply_paths', type=str, default=None,
+                         help='BATCH MODE: comma-separated .ply paths (e.g. one per training-step '
+                              'checkpoint) to render, sharing ONE mesh load + Renderer construction '
+                              'instead of repeating it per .ply. Must be paired 1:1 with --save_dirs; '
+                              '--source_image_paths/--click_markers_paths/--output_paths/'
+                              '--side_by_side_paths are also 1:1 with this if given at all (omit '
+                              'entirely to skip that output for every item in the batch). Mutually '
+                              'exclusive with --ply_path/--save_dir/--source_image_path/'
+                              '--click_markers_path/--output_path/--side_by_side_path.')
+    parser.add_argument('--save_dirs', type=str, default=None,
+                         help='BATCH MODE: comma-separated save_dir paths, 1:1 with --ply_paths.')
+    parser.add_argument('--source_image_paths', type=str, default=None,
+                         help='BATCH MODE: comma-separated --source_image_path values, 1:1 with '
+                              '--ply_paths.')
+    parser.add_argument('--click_markers_paths', type=str, default=None,
+                         help='BATCH MODE: comma-separated --click_markers_path values, 1:1 with '
+                              '--ply_paths.')
+    parser.add_argument('--side_by_side_paths', type=str, default=None,
+                         help='BATCH MODE: comma-separated --side_by_side_path values, 1:1 with '
+                              '--ply_paths.')
+    parser.add_argument('--output_paths', type=str, default=None,
+                         help='BATCH MODE: comma-separated --output_path values, 1:1 with --ply_paths.')
     parser.add_argument('--obj_path', type=str, default='./meshes/guitar.obj')
     parser.add_argument('--save_rendered_views_grid', action='store_true',
                          help='also save the <ply_basename>_rendered_views.png labeled-grid figure. '
@@ -260,11 +328,11 @@ if __name__ == '__main__':
     parser.add_argument('--render_res', type=int, default=224)
     parser.add_argument('--elev_deg', nargs='+', type=float, default=[0],
                          help='elevation angles (degrees) for the rendered views')
-    parser.add_argument('--azim_deg', nargs='+', type=float, default=[45, 90, 135],
-                         help='azimuth angles (degrees) for the rendered views. Default 45/90/135: for '
-                              "this mesh/obj's built-in orientation, azim=0/180 are degenerate edge-on "
-                              'views of the guitar (kept fixed regardless of --ply_path/--k so runs stay '
-                              'comparable).')
+    parser.add_argument('--azim_deg', nargs='+', type=float, default=[90],
+                         help='azimuth angles (degrees) for the rendered views. Default single view at '
+                              "90: for this mesh/obj's built-in orientation, azim=0/180 are degenerate "
+                              'edge-on views of the guitar (kept fixed regardless of --ply_path/--k so '
+                              'runs stay comparable). Pass multiple values to render more angles.')
     parser.add_argument('--source_image_path', type=str, default=None,
                          help='image to place on the left of the side-by-side output: the plain '
                               '<mode>_color.png (pca_color.png or position_color.png) when coloring from '
@@ -296,4 +364,29 @@ if __name__ == '__main__':
                          help='mesh resolution (facets) of each click-marker sphere')
 
     args = parser.parse_args()
+
+    if args.ply_paths:
+        if args.ply_path or args.save_dir:
+            parser.error('--ply_paths (batch mode) is mutually exclusive with --ply_path/--save_dir')
+        if not args.save_dirs:
+            parser.error('--save_dirs is required with --ply_paths')
+        args.ply_paths = args.ply_paths.split(',')
+        args.save_dirs = args.save_dirs.split(',')
+        if len(args.save_dirs) != len(args.ply_paths):
+            parser.error(f'--ply_paths has {len(args.ply_paths)} entries but --save_dirs has '
+                         f'{len(args.save_dirs)} -- must match 1:1')
+        for name in ('source_image_paths', 'click_markers_paths', 'side_by_side_paths', 'output_paths'):
+            value = getattr(args, name)
+            if value is not None:
+                parts = value.split(',')
+                if len(parts) != len(args.ply_paths):
+                    parser.error(f'--{name} has {len(parts)} entries but --ply_paths has '
+                                 f'{len(args.ply_paths)} -- must match 1:1 (or omit --{name} entirely)')
+                setattr(args, name, parts)
+    else:
+        if not (args.ply_path and args.save_dir):
+            parser.error('--ply_path and --save_dir are required unless using batch mode '
+                         '(--ply_paths/--save_dirs)')
+        args.ply_paths = None
+
     main(args)

@@ -209,7 +209,7 @@ def build_adjacent_neighbors(coords, segment_ids, fine_segments, stride=1,
     return neighbor_coords, neighbor_valid
 
 
-def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k):
+def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k, return_topk=False):
     """DPC Eq. 1-3: map each pixel to a soft point on the mesh surface.
 
     Differentiable end to end -- no detach anywhere, so gradients reach the
@@ -223,8 +223,17 @@ def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k):
         vertex_features  [V, F]  live encoder output
         vertex_positions [V, 3]
         k                how many vertices each pixel is mapped onto
+        return_topk      if True, ALSO return (topk_idx, weights) -- see below.
+                          Default False: unchanged return value/behavior, for every
+                          existing caller (byte-identical, no new allocation on that path).
 
-    Returns [n, 3] soft-mapped points.
+    Returns [n, 3] soft-mapped points (return_topk=False, the original behavior), or
+    (points [n, 3], topk_idx [n, k] long, weights [n, k] float) if return_topk=True --
+    for callers that need the underlying per-vertex weights themselves rather than
+    the already-collapsed position (e.g. modules/relational_loss.py's geodesic distance,
+    which needs a weighted expectation over PAIRS of actual vertices, not the distance
+    between two already-averaged, generally off-surface points -- see that module's
+    docstring for why the collapsed point isn't usable for a geodesic distance).
     """
     # One matmul. Training calls this with n = 2048 centers + 2048*8 neighbours
     # = 18432 rows, so at V~4036 the similarity is ~297 MB -- the dominant
@@ -241,7 +250,10 @@ def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k):
     # Average POSITIONS, not features: the loss measures distance on the
     # surface, which is only meaningful in coordinate space.
     neighbor_positions = vertex_positions[topk_idx]           # [n, k, 3]
-    return (weights.unsqueeze(-1) * neighbor_positions).sum(dim=1)
+    points = (weights.unsqueeze(-1) * neighbor_positions).sum(dim=1)
+    if return_topk:
+        return points, topk_idx, weights
+    return points
 
 
 def mapping_loss(center_points, neighbor_points, neighbor_valid):
