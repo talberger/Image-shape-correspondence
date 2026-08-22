@@ -41,7 +41,8 @@ python analysis/color_mesh_from_knn.py \
 python analysis/render_colored_mesh.py \
   --ply_path "$OUT_ROOT/step0/color_mesh_from_knn_k10/${MASKBASE}_mesh_color_position_k10_pix_${PIXTAG}.ply" \
   --save_dir "$OUT_ROOT/step0/color_mesh_from_knn_k10/render" --azim_deg 90 \
-  --source_image_path "$OUT_ROOT/step0/color_mesh_from_knn_k10/${MASKBASE}_mesh_color_position_k10_pix_${PIXTAG}_clicked_pixels.png"
+  --source_image_path "$OUT_ROOT/step0/color_mesh_from_knn_k10/${MASKBASE}_mesh_color_position_k10_pix_${PIXTAG}_clicked_pixels.png" \
+  --click_markers_path "$OUT_ROOT/step0/color_mesh_from_knn_k10/${MASKBASE}_mesh_color_position_k10_pix_${PIXTAG}_click_markers.pth"
 
 STEPS="25 50 75 100 125 150 175 200 225 250 275 300"
 

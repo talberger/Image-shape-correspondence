@@ -58,7 +58,8 @@ import torch.nn.functional as F
 from modules.cycle_consistency_loss import cycle_consistency_loss
 from modules.cycle_consistency_loss_soft import cycle_consistency_loss_soft
 from modules.vertex_balance_loss import vertex_balance_loss
-from modules.mapping_loss import feature_drift, sample_center_pixels, soft_map_to_vertices
+from modules.mapping_loss import (feature_drift, sample_center_pixels,
+                                  sample_grid_center_pixels, soft_map_to_vertices)
 from modules.relational_loss import (build_segment_index, relational_loss, relational_loss_geodesic,
                                      sample_in_segment_neighbors, sample_out_segment_neighbors)
 from modules.utils import device, loadmesh
@@ -186,7 +187,8 @@ def default_geo_table_2d_path(geo_table_3d_path, object_mask_path, seed):
                         f'_geo_table_2d_seed{seed}.pth')
 
 
-def load_geodesic_table_2d(geo_table_2d_path, object_mask_path, coords, num_center_pixels, seed):
+def load_geodesic_table_2d(geo_table_2d_path, object_mask_path, coords, num_center_pixels, seed,
+                           pool_mode=False):
     """Loads the 2D table (analysis/build_geodesic_tables.py) and verifies it was actually built
     against THIS run's centers/mask -- a stale or mismatched table would silently misattribute
     distances to the wrong pixels, exactly the class of bug check_mask_matches_knn already
@@ -194,18 +196,36 @@ def load_geodesic_table_2d(geo_table_2d_path, object_mask_path, coords, num_cent
     load_geodesic_tables so --cyc_weight>0 can load just this table without also requiring the
     (unrelated, --geodesic-only) 3D vertex-to-vertex table.
 
-    Returns (geo_table_2d [num_centers, M], geo_diag_2d float, pixel_to_node [H, W],
-    geodesic_safe_mask bool ndarray [H, W]) -- all still on CPU.
+    pool_mode=False (default): existing exact-match behavior, byte-identical to before
+    --resample_centers existed -- `coords` must be this run's fixed, already-sampled
+    --num_center_pixels centers, and the table's every row is used every step.
+
+    pool_mode=True (--resample_centers): `coords` is instead the FULL candidate pool from
+    sample_grid_center_pixels (typically far more than num_center_pixels) -- the table's
+    `num_center_pixels`/`seed` fields don't apply (that table was built with --center_mode
+    grid, not random), so those checks are skipped in favor of checking `center_mode`/
+    `grid_stride` instead. Returns the WHOLE pool table; the caller draws a fresh random
+    row-subset from it every training step.
+
+    Returns (geo_table_2d, geo_diag_2d float, pixel_to_node [H, W],
+    geodesic_safe_mask bool ndarray [H, W]) -- all still on CPU. geo_table_2d is
+    [num_center_pixels, M] in the default mode, [len(coords), M] (the whole pool) in pool_mode.
     """
     table_2d = torch.load(geo_table_2d_path, map_location='cpu')
 
-    if table_2d['num_center_pixels'] != num_center_pixels:
-        raise ValueError(f'{geo_table_2d_path} was built with num_center_pixels='
-                         f'{table_2d["num_center_pixels"]}, this run wants {num_center_pixels} '
-                         f'-- rebuild the table or fix --num_center_pixels')
-    if table_2d['seed'] != seed:
-        raise ValueError(f'{geo_table_2d_path} was built with seed={table_2d["seed"]}, this run '
-                         f'wants seed={seed} -- the sampled centers would not match')
+    if pool_mode:
+        if table_2d.get('center_mode') != 'grid':
+            raise ValueError(f'{geo_table_2d_path} was not built with --center_mode grid '
+                             f'(analysis/build_geodesic_tables.py) -- --resample_centers needs '
+                             f'a candidate-pool table, not an exact-match one')
+    else:
+        if table_2d['num_center_pixels'] != num_center_pixels:
+            raise ValueError(f'{geo_table_2d_path} was built with num_center_pixels='
+                             f'{table_2d["num_center_pixels"]}, this run wants {num_center_pixels} '
+                             f'-- rebuild the table or fix --num_center_pixels')
+        if table_2d['seed'] != seed:
+            raise ValueError(f'{geo_table_2d_path} was built with seed={table_2d["seed"]}, this run '
+                             f'wants seed={seed} -- the sampled centers would not match')
     if os.path.basename(table_2d['object_mask_path']) != os.path.basename(object_mask_path):
         raise ValueError(f'{geo_table_2d_path} was built from mask '
                          f'{table_2d["object_mask_path"]!r}, this run\'s --object_mask_path is '
@@ -213,27 +233,27 @@ def load_geodesic_table_2d(geo_table_2d_path, object_mask_path, coords, num_cent
                          f'different mask')
     if not torch.equal(table_2d['coords'], coords):
         raise ValueError(f'{geo_table_2d_path}\'s stored centers do not match the centers this '
-                         f'run just sampled (same num_center_pixels/seed/mask, but a different '
-                         f'result) -- sample_center_pixels must have changed, or something else '
-                         f'is inconsistent; table rows would silently line up with the wrong '
-                         f'pixels otherwise')
+                         f'run just sampled -- sample_center_pixels/sample_grid_center_pixels '
+                         f'must have changed, or something else is inconsistent; table rows '
+                         f'would silently line up with the wrong pixels otherwise')
 
     return (table_2d['table'], table_2d['diagonal'], table_2d['pixel_to_node'],
            table_2d['geodesic_safe_mask'].numpy())
 
 
 def load_geodesic_tables(geo_table_3d_path, geo_table_2d_path, object_mask_path, coords,
-                         num_center_pixels, seed):
+                         num_center_pixels, seed, pool_mode=False):
     """Loads both precomputed tables (analysis/build_geodesic_tables.py) -- see
-    load_geodesic_table_2d's docstring for the 2D-side validation this relies on.
+    load_geodesic_table_2d's docstring for the 2D-side validation this relies on, and for what
+    pool_mode changes.
 
-    Returns (geo_table_3d [V, V], geo_diag_3d float, geo_table_2d [num_centers, M],
-    geo_diag_2d float, pixel_to_node [H, W], geodesic_safe_mask bool ndarray [H, W]) -- all
+    Returns (geo_table_3d [V, V], geo_diag_3d float, geo_table_2d, geo_diag_2d,
+    pixel_to_node [H, W], geodesic_safe_mask bool ndarray [H, W]) -- all
     tensors still on CPU, moved to `device` by the caller alongside everything else.
     """
     table_3d = torch.load(geo_table_3d_path, map_location='cpu')
     geo_table_2d, geo_diag_2d, pixel_to_node, geodesic_safe_mask = load_geodesic_table_2d(
-        geo_table_2d_path, object_mask_path, coords, num_center_pixels, seed)
+        geo_table_2d_path, object_mask_path, coords, num_center_pixels, seed, pool_mode=pool_mode)
 
     return (table_3d['table'], table_3d['diagonal'], geo_table_2d, geo_diag_2d,
            pixel_to_node, geodesic_safe_mask)
@@ -289,11 +309,50 @@ def train(args):
     coarse_mask = torch.load(args.object_mask_path, map_location='cpu').numpy()
     fine_segments = torch.load(args.fine_seg_path, map_location='cpu').numpy()
 
-    # Centers: sampled once, fixed for the whole run (same convention as
-    # train_mapping_loss.py). Only the 16 neighbours per center are resampled
-    # every step -- see modules/relational_loss.py for why.
-    coords, _, segment_ids = sample_center_pixels(
-        coarse_mask, fine_segments, args.num_center_pixels, seed=args.seed)
+    if args.resample_centers:
+        if args.cyc_weight > 0.0:
+            raise ValueError('--resample_centers is not implemented together with --cyc_weight '
+                             '> 0 -- precompute_center_pixel_geodesic_distances is computed once '
+                             'against a fixed center set, which --resample_centers breaks')
+        if args.fixed_neighbors:
+            raise ValueError('--resample_centers with --fixed_neighbors makes no sense: '
+                             'fixed_neighbor_coords would be sampled once against ONE center '
+                             'set and then reused against every step\'s different centers')
+        if not args.geodesic:
+            raise ValueError('--resample_centers currently requires --geodesic: in Euclidean '
+                             'mode nothing stops a much larger, un-tabulated candidate pool, '
+                             'but it has not been wired up (measure_mu_3D_reference etc. still '
+                             'assume one fixed center set) -- ask if this is wanted')
+        # CANDIDATE POOL (typically tens of thousands of pixels, not args.num_center_pixels) --
+        # a fresh random subset of this becomes the actual centers every step, drawn below in
+        # the training loop. Must be produced by the exact same call
+        # (sample_grid_center_pixels(coarse_mask, fine_segments, stride)) the --center_mode grid
+        # table build used, or the table's rows won't line up with these coordinates.
+        candidate_coords, _, candidate_segment_ids = sample_grid_center_pixels(
+            coarse_mask, fine_segments, stride=args.center_grid_stride)
+        num_candidates = candidate_coords.shape[0]
+        if args.num_center_pixels > num_candidates:
+            raise ValueError(f'--num_center_pixels={args.num_center_pixels} exceeds the '
+                             f'{num_candidates}-pixel candidate pool at --center_grid_stride='
+                             f'{args.center_grid_stride} -- use a smaller stride or fewer '
+                             f'centers per step')
+        print('--resample_centers: %d candidate centers (grid stride %d), %d resampled fresh '
+              'every step (was: %d centers sampled once, fixed for the whole run)'
+              % (num_candidates, args.center_grid_stride, args.num_center_pixels,
+                 args.num_center_pixels))
+        # Placeholder for any one-time setup below that still wants SOME initial centers (e.g.
+        # seg_idx doesn't need this, but keeping the variable defined keeps the rest of this
+        # function's shape close to the non-resample path). Real per-step values are drawn
+        # fresh in the training loop.
+        step_center_idx = torch.randperm(num_candidates)[:args.num_center_pixels]
+        coords = candidate_coords[step_center_idx]
+        segment_ids = candidate_segment_ids[step_center_idx]
+    else:
+        # Centers: sampled once, fixed for the whole run (same convention as
+        # train_mapping_loss.py). Only the 16 neighbours per center are resampled
+        # every step -- see modules/relational_loss.py for why.
+        coords, _, segment_ids = sample_center_pixels(
+            coarse_mask, fine_segments, args.num_center_pixels, seed=args.seed)
     num_centers = coords.shape[0]
     print('sampled %d center pixels across %d segments'
           % (num_centers, len(torch.unique(segment_ids))))
@@ -303,7 +362,10 @@ def train(args):
             args.geo_table_3d_path, args.object_mask_path, args.seed)
         geo_table_3d, geo_diag_3d, geo_table_2d, geo_diag_2d, pixel_to_node, geodesic_safe_mask = \
             load_geodesic_tables(args.geo_table_3d_path, geo_table_2d_path,
-                                 args.object_mask_path, coords, args.num_center_pixels, args.seed)
+                                 args.object_mask_path,
+                                 candidate_coords if args.resample_centers else coords,
+                                 args.num_center_pixels, args.seed,
+                                 pool_mode=args.resample_centers)
         geo_table_3d = geo_table_3d.to(device)
         print('  geodesic tables loaded: 3D %s (diagonal=%.5f), 2D %s (diagonal=%.5f)'
               % (tuple(geo_table_3d.shape), geo_diag_3d, tuple(geo_table_2d.shape), geo_diag_2d))
@@ -453,6 +515,23 @@ def train(args):
     for step in range(1, args.num_iters + 1):
         optimizer.zero_grad()
 
+        if args.resample_centers:
+            # Fresh random subset of the candidate pool every step -- unlike the fixed-once
+            # `coords` the non-resample branch below keeps for the whole run. Neighbours are
+            # unaffected: sample_in_segment_neighbors/sample_out_segment_neighbors already draw
+            # from the FULL on-object pixel set regardless of which centers are active this
+            # step (see geodesic_distance_2d_lookup -- the table's columns already cover every
+            # on-object pixel, only the ROWS are restricted to a candidate set).
+            step_center_idx = torch.randperm(num_candidates)[:args.num_center_pixels]
+            coords = candidate_coords[step_center_idx]
+            segment_ids = candidate_segment_ids[step_center_idx]
+            if args.geodesic:
+                # Cheap fancy-indexing into the already-loaded pool table -- no new geodesic
+                # computation, same as the non-resample path's one-time row selection.
+                geo_table_2d_center_rows = geo_table_2d[step_center_idx]
+        elif args.geodesic:
+            geo_table_2d_center_rows = geo_table_2d
+
         if args.fixed_neighbors:
             neighbor_coords = fixed_neighbor_coords
         else:
@@ -490,7 +569,7 @@ def train(args):
 
             loss, mu_2D, mu_3D_live = relational_loss_geodesic(
                 center_topk_idx, center_weights, neighbor_topk_idx, neighbor_weights,
-                neighbor_coords, geo_table_3d, geo_table_2d, pixel_to_node,
+                neighbor_coords, geo_table_3d, geo_table_2d_center_rows, pixel_to_node,
                 mu_3D_reference=mu_3D_reference, mu_2D_reference=mu_2D_reference,
                 mu_3d_scale=args.mu_3d_scale, huber_delta=args.huber_delta)
         else:
@@ -618,7 +697,27 @@ if __name__ == '__main__':
 
     # Loss
     parser.add_argument('--num_center_pixels', type=int, default=2048,
-                        help='pixels the loss is computed on; sampled once, then fixed')
+                        help='pixels the loss is computed on per step. Sampled once, then '
+                             'fixed for the whole run by default; with --resample_centers, a '
+                             'fresh random subset of the candidate pool is drawn every step '
+                             'instead, but the per-step COUNT is still this number.')
+    parser.add_argument('--resample_centers', action='store_true',
+                        help='2026-08-18: instead of sample_center_pixels\'s single fixed draw '
+                             'of --num_center_pixels centers for the whole run, draw a fresh '
+                             'random --num_center_pixels subset of a much larger candidate pool '
+                             '(sample_grid_center_pixels, spacing --center_grid_stride) every '
+                             'step -- the neighbours-side counterpart of this already existed '
+                             '(resampled every step by default); this extends the same idea to '
+                             'centers. Requires --geodesic and a --center_mode grid table '
+                             '(analysis/build_geodesic_tables.py) at --geo_table_2d_path. Not '
+                             'implemented with --cyc_weight>0 or --fixed_neighbors (see train()\'s '
+                             'own checks for why). Off by default -- matches every existing '
+                             'recipe/run byte-for-byte.')
+    parser.add_argument('--center_grid_stride', type=int, default=3,
+                        help='--resample_centers only: pixel spacing of the candidate-center '
+                             'grid (sample_grid_center_pixels) -- must match the --center_mode '
+                             'grid table\'s own --grid_stride it was built with '
+                             '(analysis/build_geodesic_tables.py).')
     parser.add_argument('--k_vertices_per_pixel', type=int, default=10,
                         help="mesh vertices each pixel is softly mapped onto, nearest in "
                              "FEATURE space (DPC's k_cc)")

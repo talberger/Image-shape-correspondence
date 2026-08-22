@@ -1,0 +1,148 @@
+"""
+Phase-1 training with fused DINO+SD features instead of DINO alone. New,
+additive script -- does NOT modify encoder.py. Imports
+generate_random_views/train_encoder/preprocess_image (all unchanged) plus
+Encoder/EncoderDataset (via train_encoder, also unchanged) directly from the
+baseline; the only new code is encode_random_views_dino_sd() below, which
+mirrors encoder.py's own encode_random_views (model_type=='dino' branch)
+but calls the fused extractor (modules/dino_sd_fusion.py) per rendered view
+instead of dino_features_encoder.
+
+See PROJECT_NOTES.md (roadmap item 1) / the approved plan for the full
+design: why fused features (SHIC cites this fusion technique but its own
+repo doesn't contain the code), why no PCA (sd-dino's own PCA is fit per
+image PAIR, doesn't fit ~1000 renders + 1 photo needing one shared space;
+Diff3F -- same task as this project -- sidesteps it with L2-normalize +
+fixed-weight concat instead, no fitting step at all), why unet.up_blocks[1]
+(matches Diff3F's own modified UNet exactly, confirmed via a Stage-0 smoke
+test).
+
+model_type is fixed to 'dino_sd' (not a CLI choice) -- EncoderDataset
+(modules/dataset.py) is already fully generic over this string, no changes
+needed there.
+
+Run (mirrors encoder_dino_frontcentered's own config; --n_views/--width/
+--n_classes are this run's own, since the fused feature dim (2304 = 1280 SD
++ 1024 DINO) differs from plain DINO's 1024):
+cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python train_encoder_dino_sd.py \
+  --encoder_data_dir ./data/guitar/encoder_data_frontcentered_dinosd \
+  --encoder_model_dir ./experiments/guitar/encoder_dino_sd_frontcentered \
+  --view_sampling random --frontview_center 0 1.5707963267948966 --frontview_std 4 \
+  --n_views 1000 --width 2304 --n_classes 2304 \
+  --generate_random_views 1 --encode_random_views 1 --start_training 1
+
+Stage-2 sanity check (this project's own "measure before the full
+commitment" convention): same command with --n_views 50.
+"""
+import argparse
+import os
+
+import cv2
+import numpy as np
+import torch
+from tqdm import tqdm
+
+from encoder import generate_random_views, preprocess_image, train_encoder
+from modules.dino import DINOWrapper
+from modules.dino_sd_fusion import SD_INPUT_RES, SDFeatureExtractor, fuse_dino_sd
+from modules.utils import device, loadmesh
+
+
+def encode_random_views_dino_sd(args, dino_model, sd_extractor):
+    """Mirrors encoder.py's encode_random_views (model_type=='dino' branch)
+    exactly, except the per-view feature comes from the fused DINO+SD
+    extractor instead of dino_features_encoder. Saves under
+    <encoder_data_dir>/dino_sd_f/<render_res>/target_dino_sd_f_{i}.pt, same
+    {'model_f', 'elev', 'azim'} dict EncoderDataset already reads generically.
+    """
+    print('Generate encoded image features for model dino_sd')
+    save_dir = os.path.join(args.encoder_data_dir, 'dino_sd_f', str(args.render_res))
+    os.makedirs(save_dir, exist_ok=True)
+
+    data = torch.load(os.path.join(args.encoder_data_dir, str(args.render_res), 'random_viewing_angles.pt'))
+    elev_list, azim_list = data['elev'], data['azim']
+
+    for i in tqdm(np.arange(len(elev_list))):
+        elev, azim = elev_list[i], azim_list[i]
+        save_path = os.path.join(save_dir, f'target_dino_sd_f_{i}.pt')
+        if os.path.exists(save_path):
+            continue
+
+        image = cv2.imread(os.path.join(args.encoder_data_dir, str(args.render_res), f'target_save_{i}.png'))
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        input_image_square, input_size = preprocess_image(image, args.target_image_size)
+        with torch.no_grad():
+            dino_raw = dino_model(input_image_square)
+
+        image_t = torch.as_tensor(image, device=device, dtype=torch.float32).permute(2, 0, 1)[None] / 255.0
+        image_sd = torch.nn.functional.interpolate(
+            image_t, size=(SD_INPUT_RES, SD_INPUT_RES), mode='bilinear', align_corners=False)
+        sd_raw = sd_extractor(image_sd)
+
+        fused_raw = fuse_dino_sd(sd_raw, dino_raw)
+        # original_size=(64,64) hardcoded -- matches encoder.py's own
+        # dino_features_encoder exactly: phase-1 always supervises at 64x64,
+        # independent of the render/DINO-input resolution.
+        model_f = dino_model.postprocess_features(fused_raw, input_size=input_size, original_size=(64, 64))
+
+        torch.save({'model_f': model_f, 'elev': elev, 'azim': azim}, save_path)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--obj_path', type=str, default='./meshes/guitar.obj')
+    parser.add_argument('--name', type=str, default='guitar')
+
+    parser.add_argument('--encoder_data_dir', type=str, required=True)
+    parser.add_argument('--encoder_model_dir', type=str, required=True)
+
+    parser.add_argument('--target_image_size', type=int, default=224)
+
+    parser.add_argument('--background', nargs=3, type=float, default=[1., 1., 1.])
+    parser.add_argument('--frontview_std', type=float, default=4)
+    parser.add_argument('--render_res', type=int, default=224)
+    parser.add_argument('--frontview_center', nargs=2, type=float, default=[0., 0.])
+    parser.add_argument('--mesh_color', nargs=3, type=float, default=[2. / 3., 2. / 3., 2. / 3.])
+
+    parser.add_argument('--n_views', type=int, default=1000)
+    parser.add_argument('--view_sampling', type=str, default='random', choices=['random', 'fibonacci'])
+    parser.add_argument('--data_percentage', type=float, default=1.0)
+    parser.add_argument('--batch_size', type=int, default=1)
+
+    parser.add_argument('--depth', type=int, default=4)
+    parser.add_argument('--width', type=int, required=True,
+                        help='must match the fused feature dim (2304 = 1280 SD up_blocks[1] + 1024 DINO)')
+    parser.add_argument('--n_classes', type=int, required=True, help='same as --width')
+    parser.add_argument('--positional_encoding', type=int, default=1)
+    parser.add_argument('--sigma', type=float, default=5.0)
+    parser.add_argument('--radius', type=float, default=2.0)
+    parser.add_argument('--network_verbose', type=int, default=1)
+
+    parser.add_argument('--learning_rate', type=float, default=0.001)
+    parser.add_argument('--num_epochs', type=int, default=3)
+
+    parser.add_argument('--generate_random_views', type=int, default=0)
+    parser.add_argument('--encode_random_views', type=int, default=0)
+    parser.add_argument('--start_training', type=int, default=0)
+
+    args = parser.parse_args()
+    args.model_type = 'dino_sd'
+
+    args.mesh = loadmesh(dir=args.obj_path, name=args.name, load_rings=True)
+
+    if args.generate_random_views == 1:
+        generate_random_views(args)
+
+    if args.encode_random_views == 1:
+        dino_model = DINOWrapper(device=device, small=True, target_size=args.target_image_size).to(device)
+        print('loading SD components (first run downloads several GB, cached under $HF_HOME after)...')
+        sd_extractor = SDFeatureExtractor(device=device)
+        encode_random_views_dino_sd(args, dino_model, sd_extractor)
+        del dino_model, sd_extractor
+        torch.cuda.empty_cache()
+
+    if args.start_training == 1:
+        train_encoder(args, None)

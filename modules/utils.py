@@ -1,4 +1,5 @@
 import os
+import re
 import torch
 import torch.nn.functional as F
 import kaolin as kal
@@ -140,6 +141,28 @@ def get_img_name(img_path):
     img_name = os.path.splitext(img_name_w_suff)[0]
 
     return img_name
+
+
+def path_provenance_tag(path):
+    """Short, unambiguous tag identifying which run/checkpoint a features file
+    came from -- for embedding in an *output* filename, since generic output
+    names (e.g. 'guitar_mesh_pca_color.ply') otherwise give no way to tell,
+    after the fact, which encoder/checkpoint actually produced them; two runs
+    against the same mask/mesh would also silently overwrite each other.
+
+    <parent_dir>_<stem>, e.g. .../encoder_dino_frontcentered/pred_f.pth ->
+    'encoder_dino_frontcentered_pred_f'. Pixel DINO features are saved one
+    level deeper, .../<run_name>/step300/guitar_01_pix_dino_features.pth --
+    'step300' alone doesn't say which run, so the grandparent dir is included
+    too whenever the parent dir looks like a bare 'stepN' checkpoint folder.
+    """
+    path = os.path.abspath(path)
+    parent = os.path.basename(os.path.dirname(path))
+    stem = os.path.splitext(os.path.basename(path))[0]
+    if re.fullmatch(r'step\d+', parent):
+        grandparent = os.path.basename(os.path.dirname(os.path.dirname(path)))
+        return f'{grandparent}_{parent}_{stem}'
+    return f'{parent}_{stem}'
 
 
 def get_features_in_mask(features, mask):

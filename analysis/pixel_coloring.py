@@ -73,6 +73,31 @@ def pca_colors(features_in_mask, n_components, random_state):
     return (colors * 255).astype(np.uint8)
 
 
+def pca_colors_shared(features_a, features_b, n_components, random_state):
+    """Fit one PCA on the concatenation of features_a and features_b, then
+    project each back separately. Unlike calling pca_colors() twice, the two
+    outputs share a color space: equal colors in colors_a and colors_b then
+    mean similar features, not just similar-within-their-own-set. Each PCA
+    channel is min-max normalized jointly across both splits (not
+    independently per split), so the shared scale actually holds.
+
+    Returns (colors_a, colors_b), same uint8 [N, n_components] convention as
+    pca_colors().
+    """
+    n_a = features_a.shape[0]
+    pca = PCA(n_components=n_components, random_state=random_state)
+    combined = torch.cat([features_a, features_b], dim=0).detach().numpy()
+    reduced = pca.fit_transform(combined)
+    print('explained_variance_ratio_ (shared basis):', pca.explained_variance_ratio_)
+
+    colors = np.zeros_like(reduced, dtype=np.float32)
+    for c in range(n_components):
+        colors[:, c] = _minmax_normalize(reduced[:, c], f'PCA component {c}')
+    colors = (colors * 255).astype(np.uint8)
+
+    return colors[:n_a], colors[n_a:]
+
+
 POSITION_B_CHANNEL = 128
 
 

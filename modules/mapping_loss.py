@@ -88,6 +88,51 @@ def sample_center_pixels(coarse_mask, fine_segments, num_pixels, seed=0):
             torch.from_numpy(fine_segments[coords[:, 0], coords[:, 1]].astype(np.int64)))
 
 
+def sample_grid_center_pixels(coarse_mask, fine_segments, stride):
+    """Deterministic, evenly-spaced CANDIDATE POOL of center pixels: every eligible
+    (on-object, fine-segment-labeled) pixel at (row, col) with row % stride == 0 and
+    col % stride == 0 -- as opposed to sample_center_pixels's single random draw of
+    exactly num_pixels centers, fixed for the whole run.
+
+    Built for --resample_centers (phase2/train_relational_loss.py, 2026-08-18): a
+    per-step random SUBSET of this pool becomes that step's centers, so the network
+    sees a different center set every step instead of the same fixed 2048 forever.
+    The pool itself must stay identical between analysis/build_geodesic_tables.py's
+    --center_mode grid run (which needs a source for every candidate pixel) and
+    training (which needs the exact same candidates to index into that table) -- both
+    call this same function with the same (mask, fine_segments, stride), no seed
+    involved since the grid is a deterministic function of its inputs.
+
+    Returns (coords, normalized_coords, segment_ids), same shapes/convention as
+    sample_center_pixels -- just typically far more of them (e.g. stride=3 on this
+    mesh's mask gives ~23.6k candidates vs. sample_center_pixels's usual 2048).
+    """
+    if coarse_mask.shape != fine_segments.shape:
+        raise ValueError('mask %s and segments %s disagree'
+                         % (tuple(coarse_mask.shape), tuple(fine_segments.shape)))
+    if stride < 1:
+        raise ValueError('stride must be >= 1, got %r' % (stride,))
+
+    eligible = coarse_mask & (fine_segments > 0)
+    grid_mask = np.zeros_like(eligible)
+    grid_mask[::stride, ::stride] = True
+    eligible_grid = eligible & grid_mask
+
+    rows, cols = np.nonzero(eligible_grid)
+    if len(rows) == 0:
+        raise ValueError('stride=%d leaves zero eligible candidate centers' % stride)
+    coords = np.stack([rows, cols], axis=1)
+
+    obj_rows, obj_cols = np.nonzero(coarse_mask)
+    height = obj_rows.max() - obj_rows.min() + 1
+    width = obj_cols.max() - obj_cols.min() + 1
+    diagonal = float(np.hypot(height, width))
+
+    return (torch.from_numpy(coords).long(),
+            torch.from_numpy(coords.astype(np.float32) / diagonal),
+            torch.from_numpy(fine_segments[coords[:, 0], coords[:, 1]].astype(np.int64)))
+
+
 def build_pixel_neighbors(coords, segment_ids, k):
     """LEGACY -- not used by training. For each center pixel, its k nearest
     *center* pixels in the same segment.

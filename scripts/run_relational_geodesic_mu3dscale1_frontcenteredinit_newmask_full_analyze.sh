@@ -51,18 +51,15 @@ SRC="$POSCOLOR,$POSCOLOR,$POSCOLOR,$POSCOLOR"
 python analysis/render_colored_mesh.py --ply_paths "$PLY_PATHS" --save_dirs "$SAVE_DIRS" --azim_deg 90 \
   --source_image_paths "$SRC"
 
-echo "=== back-projection (checker16, k=1/10/100 + soft_snap) ==="
-for k in 1 10 100; do
-  python analysis/color_image_from_knn.py --mask_path "$MASK" --knn_dir "$OUT" --knn_path "$KNN" \
-    --vertex_colors_path "$CHECKER" --k $k --save_dir "$OUT/back_projection"
-done
+echo "=== back-projection (checker16, k=1 + soft_snap only -- k=10/k=100 dropped 2026-08-18, ==="
+echo "=== Tal's call: those side-by-sides were redundant on top of k=1 + soft_snap)         ==="
+python analysis/color_image_from_knn.py --mask_path "$MASK" --knn_dir "$OUT" --knn_path "$KNN" \
+  --vertex_colors_path "$CHECKER" --k 1 --save_dir "$OUT/back_projection"
 python analysis/color_image_from_knn.py --mask_path "$MASK" --knn_dir "$OUT/color_mesh_from_soft_mapping" \
   --knn_path "$SOFT_CORR" --vertex_colors_path "$CHECKER" --k 1 --save_dir "$OUT/back_projection" \
   --output_path "$OUT/back_projection/${MASKBASE}_backproj_guitar_mesh_checker16_color_soft_snap_k1.png"
 
 rm -f "$OUT/back_projection/${MASKBASE}_backproj_guitar_mesh_checker16_color_k1.png" \
-      "$OUT/back_projection/${MASKBASE}_backproj_guitar_mesh_checker16_color_k10.png" \
-      "$OUT/back_projection/${MASKBASE}_backproj_guitar_mesh_checker16_color_k100.png" \
       "$OUT/back_projection/${MASKBASE}_backproj_guitar_mesh_checker16_color_soft_snap_k1.png"
 
 echo "=== hard-snap markers (9 explicit tracked pixels, soft-to-hard mapping) ==="
