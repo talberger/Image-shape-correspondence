@@ -21,8 +21,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 FONT_PATH = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 
-AXISFIX_DIR = 'demo/guitar/bsb_sd_dino_l2norm_frontcentered_axisfix_ZS/features_analyze'
-DFD_DIR = 'demo/guitar/bsb_sd_dino_dfd_frontcentered_ZS/features_analyze'
+AXISFIX_DIR = 'demo/guitar/runs/legacy/bsb_sd_dino_l2norm_frontcentered_axisfix_ZS/features_analyze'
+DFD_DIR = 'demo/guitar/runs/legacy/bsb_sd_dino_dfd_frontcentered_ZS/features_analyze'
 OUT_PATH = 'demo/guitar/dfd_vs_axisfix_phase1_comparison_3donly.png'
 
 PCA_MESH_CROP = (810, 0, 1890, 1080)

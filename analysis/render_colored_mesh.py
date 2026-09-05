@@ -192,8 +192,15 @@ def render_one(mesh, renderer, ply_path, save_dir, elev_deg, azim_deg, save_rend
         # A .ply with its own geometry (mesh_coloring.py's flat checkerboard splits
         # every face into 3 vertices). Render what the file actually contains; the
         # --obj_path mesh is only the default source of geometry, not a constraint.
-        # setcolor_mesh_batched normalizes whatever it is handed, so framing is
-        # unchanged.
+        #
+        # The old comment here said "setcolor_mesh_batched normalizes whatever it is
+        # handed, so framing is unchanged". That was only ever true for a mesh whose
+        # normalizer is the identity. setcolor_mesh_batched re-centres on the mean of
+        # the SPLIT vertices, and measured 2026-09-02 that took the isotropic guitar
+        # from Y-extent 1.9966 to 1.5553 while leaving the original at 1.9918 -- i.e.
+        # the analysis renders came out ~22% smaller for no reason but the sampling.
+        # frame_locked is propagated from the --obj_path mesh so a mesh that declares
+        # its own frame keeps it here too (no-op for every mesh without a sidecar).
         ply_verts, ply_faces = load_ply_geometry(ply_path)
         if ply_verts.shape[0] != vertex_colors.shape[0]:
             raise ValueError(f'{ply_path} is internally inconsistent: '
@@ -203,6 +210,7 @@ def render_one(mesh, renderer, ply_path, save_dir, elev_deg, azim_deg, save_rend
               f'({ply_faces.shape[0]} faces)')
         render_mesh = RenderMesh(torch.from_numpy(ply_verts).to(device),
                                  torch.from_numpy(ply_faces).to(device))
+        render_mesh.frame_locked = getattr(mesh, 'frame_locked', False)
 
     if click_markers_path is not None:
         render_mesh, vertex_colors = add_click_marker_spheres(

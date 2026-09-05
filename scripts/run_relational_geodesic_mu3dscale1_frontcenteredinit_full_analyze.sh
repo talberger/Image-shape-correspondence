@@ -3,7 +3,7 @@ set -e
 source /workspace/activate_bsb.sh
 
 RUN=experiments/guitar/encoder_dino_relational_geodesic_mu3dscale1_frontcenteredinit
-OUT=demo/guitar/bsb_relational_geodesic_mu3dscale1_frontcenteredinit/analyze
+OUT=demo/guitar/runs/legacy/bsb_relational_geodesic_mu3dscale1_frontcenteredinit/analyze
 MASK=demo/guitar/bsb_origin/guitar_01_click_130_140_sam_mask_2.pth
 PIXFEAT=demo/guitar/bsb_origin/guitar_01_pix_dino_features.pth
 POSCOLOR=demo/guitar/bsb_retrained/pixel_coloring/guitar_01_click_130_140_sam_mask_2_position_color.png
@@ -67,6 +67,6 @@ python analysis/render_colored_mesh.py \
   --ply_path "$OUT/color_mesh_from_soft_mapping/guitar_01_click_130_140_sam_mask_2_hard_snap_spheres_pix_random7_seed152.ply" \
   --save_dir "$OUT/color_mesh_from_soft_mapping/render" \
   --azim_deg 90 \
-  --source_image_path "demo/guitar/bsb_relational_geodesic_mu3dscale1_frontcenteredinit/step300/color_mesh_from_knn_k10/guitar_01_click_130_140_sam_mask_2_mesh_color_position_k10_pix_random7_seed152_clicked_pixels.png"
+  --source_image_path "demo/guitar/runs/legacy/bsb_relational_geodesic_mu3dscale1_frontcenteredinit/step300/color_mesh_from_knn_k10/guitar_01_click_130_140_sam_mask_2_mesh_color_position_k10_pix_random7_seed152_clicked_pixels.png"
 
 echo "ALL DONE"

@@ -181,9 +181,17 @@ def main(args):
     distinct = torch.unique(pixel_colors.round().to(torch.int32), dim=0).shape[0]
     print(f'distinct pixel colors produced: {distinct}')
 
+    background_image = None
+    if args.source_image_path is not None:
+        background_image = np.array(Image.open(args.source_image_path).convert('RGB'))
+        if background_image.shape[:2] != knn['mask_shape']:
+            raise ValueError(f'--source_image_path {args.source_image_path} is '
+                             f'{background_image.shape[:2]}, mask is {knn["mask_shape"]}')
+
     img = build_output_image(knn['mask_shape'], knn['pixel_row'], knn['pixel_col'],
                              np.clip(np.round(pixel_colors.numpy()), 0, 255).astype(np.uint8),
-                             args.background_color, args.transparent_background)
+                             args.background_color, args.transparent_background,
+                             background_image=background_image)
     Image.fromarray(img).save(output_path)
     print(f'saved to {output_path}')
 
@@ -235,8 +243,13 @@ if __name__ == '__main__':
                               '(what render_colored_mesh.py writes). Skipped with a warning if absent.')
     parser.add_argument('--side_by_side_path', type=str, default=None,
                          help='defaults to <output_path>_side_by_side.png')
+    parser.add_argument('--source_image_path', type=str, default=None,
+                         help='2026-09-03: the real photo to show OUTSIDE the mask instead of a '
+                             'flat --background_color fill (e.g. the original --img_path). Must '
+                             'match the mask\'s [H, W]. Ignored if --transparent_background is set '
+                             '(alpha already makes the background invisible there).')
     parser.add_argument('--background_color', nargs=3, type=int, default=[255, 255, 255],
-                         help='RGB for pixels outside the mask')
+                         help='RGB for pixels outside the mask (ignored if --source_image_path is set)')
     parser.add_argument('--transparent_background', type=int, default=None,
                          help='if set (0-255), output is RGBA with this alpha for background pixels')
 

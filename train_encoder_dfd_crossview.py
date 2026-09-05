@@ -56,7 +56,7 @@ def load_all_points(args):
             f"view {i}: xyz_bary_f/{args.feature_model_type}_f cache elev/azim mismatch")
 
         xyz_f = xyz['model_f']  # [3, H, W]
-        feat_f = feat['model_f']
+        feat_f = feat['model_f'].float()  # cache may be float16 (--cache_dtype); always train in float32
         if feat_f.dim() == 4:
             feat_f = feat_f.squeeze(0)  # dino_sd_f keeps postprocess_features' leading dim of 1
 

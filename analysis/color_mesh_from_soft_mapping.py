@@ -41,7 +41,7 @@ from modules.mesh import Mesh
 from modules.utils import get_features_in_mask, get_img_name, loadmesh, write_ply
 
 
-def compute_soft_snap(features_in_mask, vertex_features, vertex_positions, k, chunk_size, device):
+def compute_soft_snap(features_in_mask, vertex_features, vertex_positions, k, chunk_size, device, temperature=1.0):
     """For each masked pixel: soft-map to a continuous 3D point (soft_map_to_vertices), then
     hard-snap to the nearest actual vertex by Euclidean distance. Chunked over pixels -- the
     per-chunk [chunk, V] distance matrix is the dominant allocation, same reason
@@ -62,7 +62,8 @@ def compute_soft_snap(features_in_mask, vertex_features, vertex_positions, k, ch
     for start in range(0, n, chunk_size):
         end = min(start + chunk_size, n)
         print(f'soft-mapping pixels {start + 1} to {end} out of {n}')
-        y_hat = soft_map_to_vertices(pixel_feats[start:end], vert_feats, vert_pos, k)  # [chunk, 3]
+        y_hat = soft_map_to_vertices(pixel_feats[start:end], vert_feats, vert_pos, k,
+                                      temperature=temperature)  # [chunk, 3]
         dist2 = (y_hat.unsqueeze(1) - vert_pos.unsqueeze(0)).pow(2).sum(-1)            # [chunk, V]
         nearest_d2, nearest_idx = dist2.min(dim=1)
         nearest_vertex_idx[start:end] = nearest_idx.cpu()
@@ -115,7 +116,7 @@ def main(args):
 
     nearest_vertex_idx, nearest_distance = compute_soft_snap(
         features_in_mask, vertex_features, norm_mesh.vertices, args.k_vertices_per_pixel,
-        args.chunk_size, device)
+        args.chunk_size, device, temperature=args.temperature)
 
     # Persist the per-pixel decision in pixel_to_vertex_nn.py's own output shape (top_k=1: this
     # method assigns exactly one vertex per pixel, no top-K to store) so
@@ -206,6 +207,10 @@ if __name__ == '__main__':
                               'y_hat per pixel (DPC Eq. 2-3 / soft_map_to_vertices). 10 matches the default '
                               'used across every phase2/train_*.py script, so this reproduces the same y_hat '
                               'training itself optimizes against.')
+    parser.add_argument('--temperature', type=float, default=1.0,
+                         help='softmax temperature for the soft mapping (see '
+                               'modules/mapping_loss.py:soft_map_to_vertices). 1.0 = the plain '
+                               'softmax every previous coverage number in this project used.')
     parser.add_argument('--chunk_size', type=int, default=20000,
                          help='number of masked pixels processed per chunk (soft-mapping + nearest-vertex search)')
     parser.add_argument('--uncovered_color', nargs=3, type=int, default=[200, 200, 200],

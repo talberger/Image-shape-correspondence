@@ -19,8 +19,8 @@ source-photo/rendered-view split specifically):
 
 Run (standard full_analyze layout, defaults match every *_full_analyze.sh in scripts/):
 cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/build_analysis_summary.py \
-  --analyze_dir demo/guitar/bsb_sd_dino_l2norm_relational_geodesic_mu3dscale1_phase2/analyze \
-  --output_path demo/guitar/bsb_sd_dino_l2norm_relational_geodesic_mu3dscale1_phase2/analysis_summary.png
+  --analyze_dir demo/guitar/runs/legacy/bsb_sd_dino_l2norm_relational_geodesic_mu3dscale1_phase2/analyze \
+  --output_path demo/guitar/runs/legacy/bsb_sd_dino_l2norm_relational_geodesic_mu3dscale1_phase2/analysis_summary.png
 """
 import argparse
 import os
@@ -52,8 +52,8 @@ def main(args):
     knn_k10 = load(f'{a}/color_mesh_from_knn_k10/render/{mb}_mesh_color_position_k10_side_by_side.png')
     knn_k100 = load(f'{a}/color_mesh_from_knn_k100/render/{mb}_mesh_color_position_k100_side_by_side.png')
     soft = load(f'{a}/color_mesh_from_soft_mapping/render/{mb}_mesh_color_soft_snap_position_k10_side_by_side.png')
-    bp_k1 = load(f'{a}/back_projection/{mb}_backproj_guitar_mesh_checker16_color_k1_side_by_side.png')
-    bp_soft = load(f'{a}/back_projection/{mb}_backproj_guitar_mesh_checker16_color_soft_snap_k1_side_by_side.png')
+    bp_k1 = load(f'{a}/back_projection/{mb}_backproj_{args.checker_stem}_k1_side_by_side.png')
+    bp_soft = load(f'{a}/back_projection/{mb}_backproj_{args.checker_stem}_soft_snap_k1_side_by_side.png')
     hard_snap = load(f'{a}/color_mesh_from_soft_mapping/render/{mb}_hard_snap_spheres_pix_{pt}_side_by_side.png')
 
     source, knn_k1_r = split(knn_k1, args.knn_split_x)
@@ -109,6 +109,11 @@ if __name__ == '__main__':
                          help='a run\'s .../analyze directory, as produced by any *_full_analyze.sh')
     parser.add_argument('--mask_base', type=str, default='guitar_01_click_270_370_sam_mask_2')
     parser.add_argument('--pixtag', type=str, default='explicit9')
+    parser.add_argument('--checker_stem', type=str, default='guitar_mesh_checker16_color',
+                        help='basename (no .pth) of the vertex-colour file the back-projection was '
+                             'built from -- color_image_from_knn.py names its outputs after THAT, '
+                             'not after the mesh, so a different mesh\'s checker lands under a '
+                             'different filename (2026-09-02). Default is the original mesh\'s.')
     parser.add_argument('--knn_split_x', type=int, default=810,
                          help='left-panel (source photo) width in the knn_k1/k10/k100/'
                               'soft_mapping side_by_side.png files')

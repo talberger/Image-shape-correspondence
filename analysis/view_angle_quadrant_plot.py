@@ -132,6 +132,6 @@ if __name__ == '__main__':
     parser.add_argument('--fib_angles', type=str,
                         default='data/guitar/encoder_data_fib1000/224/random_viewing_angles.pt')
     parser.add_argument('--output', type=str,
-                        default='demo/guitar/bsb_fib1000_ZR/view_angle_comparison_random_vs_fibonacci.png')
+                        default='demo/guitar/runs/legacy/bsb_fib1000_ZR/view_angle_comparison_random_vs_fibonacci.png')
     args = parser.parse_args()
     main(args)

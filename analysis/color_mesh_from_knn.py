@@ -129,6 +129,16 @@ def select_pixels(args, n_masked):
     return None, None
 
 
+_MESH_CACHE = {}
+
+
+def _load_mesh(obj_path):
+    """Cache the mesh per process so batch mode pays the load once, not once per checkpoint."""
+    if obj_path not in _MESH_CACHE:
+        _MESH_CACHE[obj_path] = Mesh(obj_path)
+    return _MESH_CACHE[obj_path]
+
+
 def main(args):
     mask_basename = os.path.splitext(os.path.basename(args.mask_path))[0]
     knn_path = args.knn_path or os.path.join(args.save_dir, f'{mask_basename}_pixel_to_vertex_nn.pth')
@@ -206,7 +216,7 @@ def main(args):
     vertex_colors[covered.numpy()] = avg_color
     vertex_colors = np.clip(np.round(vertex_colors), 0, 255).astype(np.int32)
 
-    mesh = Mesh(args.obj_path)
+    mesh = _load_mesh(args.obj_path)
     verts = mesh.vertices.detach().cpu().numpy()
     faces = mesh.faces.detach().cpu().numpy()
     if verts.shape[0] != num_vertices:
@@ -234,7 +244,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--mask_path', type=str, required=True,
                          help='used only to derive default paths below (same mask the pixel coloring and NN steps were run on)')
-    parser.add_argument('--save_dir', type=str, required=True)
+    parser.add_argument('--save_dir', type=str, default=None,
+                        help='required unless --save_dirs (batch mode) is given')
+    parser.add_argument('--knn_paths', type=str, default=None,
+                        help='BATCH MODE: comma-separated --knn_path values. Pair with --save_dirs '
+                             '(same length). One process, mesh loaded once -- the step-progression '
+                             'script called this 12 times and paid 12 cold starts (~5.5 min).')
+    parser.add_argument('--save_dirs', type=str, default=None,
+                        help='BATCH MODE: comma-separated --save_dir values, one per --knn_paths entry.')
     parser.add_argument('--knn_path', type=str, default=None,
                          help='defaults to <save_dir>/<mask_basename>_pixel_to_vertex_nn.pth (pixel_to_vertex_nn.py output)')
     parser.add_argument('--color_mode', type=str, choices=['pca', 'position'], default='pca',
@@ -291,4 +308,19 @@ if __name__ == '__main__':
                          help='outline width in pixels of each clicked-pixel marker circle')
 
     args = parser.parse_args()
-    main(args)
+    if not args.knn_paths and not args.save_dir:
+        parser.error('--save_dir is required (or use --knn_paths/--save_dirs for batch mode)')
+    if args.knn_paths or args.save_dirs:
+        if not (args.knn_paths and args.save_dirs):
+            parser.error('--knn_paths and --save_dirs must be given together')
+        knn_paths = [x for x in args.knn_paths.split(',') if x]
+        save_dirs = [x for x in args.save_dirs.split(',') if x]
+        if len(knn_paths) != len(save_dirs):
+            parser.error(f'--knn_paths has {len(knn_paths)} entries but --save_dirs has {len(save_dirs)}')
+        for i, (kp, sd) in enumerate(zip(knn_paths, save_dirs), 1):
+            print(f'=== batch {i}/{len(knn_paths)}: {kp} -> {sd} ===')
+            args.knn_path, args.save_dir = kp, sd
+            os.makedirs(sd, exist_ok=True)
+            main(args)
+    else:
+        main(args)

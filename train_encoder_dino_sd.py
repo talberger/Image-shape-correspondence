@@ -43,8 +43,10 @@ import torch
 from tqdm import tqdm
 
 from encoder import generate_random_views, preprocess_image, train_encoder
+from analysis.compare_dino_patch_stride import set_patch_stride
 from modules.dino import DINOWrapper
-from modules.dino_sd_fusion import SD_INPUT_RES, SDFeatureExtractor, fuse_dino_sd
+from modules.dino_sd_fusion import (SD_INPUT_RES, SDFeatureExtractor, dino_only, fuse_dino_sd,
+                                    fuse_dino_sd_common_grid, sd_frame_aspect_nopad, sd_square)
 from modules.utils import device, loadmesh
 
 
@@ -56,7 +58,8 @@ def encode_random_views_dino_sd(args, dino_model, sd_extractor):
     {'model_f', 'elev', 'azim'} dict EncoderDataset already reads generically.
     """
     print('Generate encoded image features for model dino_sd')
-    save_dir = os.path.join(args.encoder_data_dir, 'dino_sd_f', str(args.render_res))
+    name = args.feature_cache_name
+    save_dir = os.path.join(args.encoder_data_dir, f'{name}_f', str(args.render_res))
     os.makedirs(save_dir, exist_ok=True)
 
     data = torch.load(os.path.join(args.encoder_data_dir, str(args.render_res), 'random_viewing_angles.pt'))
@@ -64,7 +67,7 @@ def encode_random_views_dino_sd(args, dino_model, sd_extractor):
 
     for i in tqdm(np.arange(len(elev_list))):
         elev, azim = elev_list[i], azim_list[i]
-        save_path = os.path.join(save_dir, f'target_dino_sd_f_{i}.pt')
+        save_path = os.path.join(save_dir, f'target_{name}_f_{i}.pt')
         if os.path.exists(save_path):
             continue
 
@@ -75,17 +78,59 @@ def encode_random_views_dino_sd(args, dino_model, sd_extractor):
         with torch.no_grad():
             dino_raw = dino_model(input_image_square)
 
-        image_t = torch.as_tensor(image, device=device, dtype=torch.float32).permute(2, 0, 1)[None] / 255.0
-        image_sd = torch.nn.functional.interpolate(
-            image_t, size=(SD_INPUT_RES, SD_INPUT_RES), mode='bilinear', align_corners=False)
-        sd_raw = sd_extractor(image_sd)
+        if args.dino_only:
+            # The SD branch is not merely zeroed -- it is never computed. SD is ~80% of this
+            # loop's cost (2026-08-28 timing: 672 ms of ~720 ms per view), so the DINO-only cache
+            # is both the ablation arm and much cheaper to build.
+            fused_raw = dino_only(dino_raw)
+            model_f = dino_model.postprocess_features(
+                fused_raw, input_size=input_size, original_size=(64, 64),
+                fix_grid_alignment=args.fix_grid_alignment,
+                patch_stride=args.dino_patch_stride)
+            if args.cache_dtype == 'float16':
+                model_f = model_f.half()
+            torch.save({'model_f': model_f, 'elev': elev, 'azim': azim}, save_path)
+            continue
 
-        fused_raw = fuse_dino_sd(sd_raw, dino_raw)
+        image_t = torch.as_tensor(image, device=device, dtype=torch.float32).permute(2, 0, 1)[None] / 255.0
+        # --- Tal edit, 2026-08-30 ---
+        # Renders are SQUARE, so square_pad and aspect_nopad produce the identical 512x512 input
+        # here; the framing flag only matters for the photo. --fuse_mode common_grid, however,
+        # DOES change this cache: SD stops being downsampled onto DINO's 16x16 grid and is
+        # upsampled from its own 32x32 straight to the 64x64 phase-1 target. A cache built with a
+        # different --fuse_mode is NOT interchangeable with the production one.
+        image_sd = (sd_frame_aspect_nopad(image_t) if args.sd_frame == 'aspect_nopad'
+                    else sd_square(image_t))
+        sd_raw = sd_extractor(image_sd, noise_index=int(i))
+
+        if args.fuse_mode == 'common_grid':
+            dino_at_grid = dino_model.postprocess_features(
+                dino_raw, input_size=input_size, original_size=(64, 64),
+                fix_grid_alignment=args.fix_grid_alignment,
+                patch_stride=args.dino_patch_stride)
+            model_f = fuse_dino_sd_common_grid(sd_raw, dino_at_grid, (64, 64))
+            fused_raw = None
+        else:
+            fused_raw = fuse_dino_sd(sd_raw, dino_raw)
         # original_size=(64,64) hardcoded -- matches encoder.py's own
         # dino_features_encoder exactly: phase-1 always supervises at 64x64,
         # independent of the render/DINO-input resolution.
-        model_f = dino_model.postprocess_features(fused_raw, input_size=input_size, original_size=(64, 64))
+        if fused_raw is not None:
+            model_f = dino_model.postprocess_features(
+                fused_raw, input_size=input_size, original_size=(64, 64),
+                fix_grid_alignment=args.fix_grid_alignment,
+                patch_stride=args.dino_patch_stride)
 
+        # --- cache dtype (added 2026-08-28) ---
+        # The cached target is [1, 2304, 64, 64] = 38 MB in float32, x1000 views = 36 GB per
+        # phase-1 cache, and four of those caches were 144 GB of a 225 GB volume. Stored as
+        # float16 it is 19 MB / 18 GB, and the torch.save itself roughly halves. Every reader
+        # casts back to float32 on load (train_encoder_dfd_crossview.py, train_encoder_dfd.py,
+        # train_dino_sd_postproc.py), so training sees float32 either way -- the only difference
+        # is the rounding of the stored values. Default stays float32 so every existing cache and
+        # every existing script is untouched; pass --cache_dtype float16 explicitly.
+        if args.cache_dtype == 'float16':
+            model_f = model_f.half()
         torch.save({'model_f': model_f, 'elev': elev, 'azim': azim}, save_path)
 
 
@@ -100,6 +145,32 @@ if __name__ == '__main__':
     parser.add_argument('--encoder_model_dir', type=str, required=True)
 
     parser.add_argument('--target_image_size', type=int, default=224)
+    parser.add_argument('--sd_frame', choices=['square_pad', 'aspect_nopad'], default='square_pad',
+                        help='no-op for square renders; present so the photo and the cache can be '
+                             'described by the same flags')
+    parser.add_argument('--fuse_mode', choices=['dino_grid', 'common_grid'], default='dino_grid',
+                        help="dino_grid = production. common_grid fuses at the 64x64 phase-1 "
+                             "target instead of downsampling SD onto DINO's grid first.")
+    parser.add_argument('--dino_only', action='store_true',
+                        help='drop the SD branch entirely: cache the DINO half of the fusion '
+                             '(1024 ch, not 2304). SD is never loaded or run. Use --width 1024 '
+                             '--n_classes 1024 to match, and note --sd_frame/--fuse_mode become '
+                             'no-ops. Added 2026-09-01 for the DINO vs DINO+SD ablation.')
+    parser.add_argument('--dino_patch_stride', type=int, default=None,
+                        help='overlapping-patch extraction: lower the patch-embedding stride below the '
+                             'patch size (denser token grid, no retraining). None = unchanged.')
+    parser.add_argument('--fix_grid_alignment', action='store_true',
+                        help='place tokens at their true receptive-field centres when upsampling '
+                             '(required for any stride != patch size; see modules/dino.py)')
+    parser.add_argument('--feature_cache_name', type=str, default='dino_sd',
+                        help="cache dir/file stem: <encoder_data_dir>/<name>_f/<render_res>/target_<name>_f_i.pt; "
+                             'must match train_encoder_dfd_crossview.py --feature_model_type')
+    parser.add_argument('--cache_dtype', type=str, default='float32',
+                        choices=['float32', 'float16'],
+                        help='dtype of the cached per-view target features. float16 halves the '
+                             'cache on disk (36 GB -> 18 GB per 1000 views) and the torch.save '
+                             'time; every reader casts back to float32 on load. Default float32 '
+                             'keeps existing caches/scripts bit-identical.')
 
     parser.add_argument('--background', nargs=3, type=float, default=[1., 1., 1.])
     parser.add_argument('--frontview_std', type=float, default=4)
@@ -138,8 +209,15 @@ if __name__ == '__main__':
 
     if args.encode_random_views == 1:
         dino_model = DINOWrapper(device=device, small=True, target_size=args.target_image_size).to(device)
-        print('loading SD components (first run downloads several GB, cached under $HF_HOME after)...')
-        sd_extractor = SDFeatureExtractor(device=device)
+        if args.dino_patch_stride is not None:
+            set_patch_stride(dino_model, args.dino_patch_stride)
+            print(f'  DINO patch stride overridden: {dino_model.patch_size()} -> {args.dino_patch_stride}')
+        if args.dino_only:
+            print('--dino_only: skipping Stable Diffusion entirely (1024-ch DINO cache)')
+            sd_extractor = None
+        else:
+            print('loading SD components (first run downloads several GB, cached under $HF_HOME after)...')
+            sd_extractor = SDFeatureExtractor(device=device)
         encode_random_views_dino_sd(args, dino_model, sd_extractor)
         del dino_model, sd_extractor
         torch.cuda.empty_cache()

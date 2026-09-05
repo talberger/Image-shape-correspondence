@@ -14,7 +14,7 @@ CHECKER=demo/guitar/colored_mesh/guitar_mesh_checker16_color.pth
 for RUN in fib1000 retrained; do
   if [ "$RUN" = "fib1000" ]; then
     PRED_F=experiments/guitar/encoder_dino_fib1000/pred_f.pth
-    OUT=demo/guitar/bsb_fib1000_ZR
+    OUT=demo/guitar/runs/legacy/bsb_fib1000_ZR
     BACKPROJ=$OUT/back_projection
   else
     PRED_F=experiments/guitar/encoder_dino/pred_f.pth

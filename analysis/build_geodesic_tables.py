@@ -105,6 +105,24 @@ def build_3d_table(obj_path, name, t_coef, undershoot_tol):
     return torch.from_numpy(table), diagonal
 
 
+def largest_connected_component(mask):
+    """The mask restricted to its largest 8-connected component, dropping any smaller
+    disconnected specks (e.g. stray SAM-segmentation pixels). Factored out (2026-09-03) so it can
+    run BEFORE center sampling, not just inside build_2d_table -- sample_center_pixels draws from
+    the RAW coarse_mask, so a center landing on a speck crashed build_2d_table with "some sample
+    centers are not on-object pixels" (found on demo/shic's bear3 mask, which has 4 specks vs the
+    guitar mask's 2 -- higher odds of a center landing on one of 2048 draws). A no-op whenever the
+    mask is already one component, so every existing (guitar) call site is unaffected."""
+    import scipy.ndimage
+    labeled, num_components = scipy.ndimage.label(mask, structure=np.ones((3, 3), dtype=int))
+    if num_components <= 1:
+        return mask, num_components
+    sizes = np.bincount(labeled.ravel())
+    sizes[0] = 0
+    largest_label = int(sizes.argmax())
+    return labeled == largest_label, num_components
+
+
 def build_2d_table(coords, coarse_mask, chunk_size=2000):
     """coords: int64 [n, 2] (row, col) of the fixed sample centers.
     coarse_mask: bool ndarray [H, W].
@@ -135,14 +153,8 @@ def build_2d_table(coords, coarse_mask, chunk_size=2000):
     silent mismatch between what this table was built against and what training later samples
     from).
     """
-    import scipy.ndimage
-
-    labeled, num_components = scipy.ndimage.label(coarse_mask, structure=np.ones((3, 3), dtype=int))
+    geodesic_safe_mask, num_components = largest_connected_component(coarse_mask)
     if num_components > 1:
-        sizes = np.bincount(labeled.ravel())
-        sizes[0] = 0  # background label, not a real component
-        largest_label = int(sizes.argmax())
-        geodesic_safe_mask = labeled == largest_label
         dropped = int(coarse_mask.sum() - geodesic_safe_mask.sum())
         print(f'coarse_mask has {num_components} connected components; keeping only the largest '
               f'({int(geodesic_safe_mask.sum())} px), dropping {dropped} px across '
@@ -258,6 +270,10 @@ def main(args):
     print('=== 2D geodesic table (dijkstra, whole mask) ===')
     coarse_mask = torch.load(args.object_mask_path, map_location='cpu').numpy()
     fine_segments = torch.load(args.fine_seg_path, map_location='cpu').numpy()
+    # Restrict to the largest connected component BEFORE sampling centers, not just inside
+    # build_2d_table -- see largest_connected_component's docstring for why sampling against the
+    # raw mask can crash. A no-op (same array back) when the mask is already one component.
+    coarse_mask, _num_components = largest_connected_component(coarse_mask)
 
     if args.center_mode == 'grid':
         # CANDIDATE POOL, not a fixed center set -- built for --resample_centers

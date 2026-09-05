@@ -72,13 +72,15 @@ import os
 import sys
 
 import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from analysis.pixel_coloring import pca_colors
 from modules.mesh import Mesh
-from modules.utils import write_ply
+from modules.utils import loadmesh, write_ply
 
 
 def load_vertex_features(vertex_features_path, num_vertices):
@@ -143,6 +145,129 @@ CHECKER_PALETTE = [
 
 CHECKER_NEIGHBOR_OFFSETS = [(-1, 0, 0), (1, 0, 0), (0, -1, 0),
                             (0, 1, 0), (0, 0, -1), (0, 0, 1)]
+
+
+# ---------------------------------------------------------------------------
+# --checker_coords lbo (2026-09-03, Tal): an INTRINSIC alternative to the xyz
+# lattice above.
+#
+# WHY. The xyz diagonal rule ((i - j + 3k) mod 8) looks clean on a near-planar
+# mesh (meshes/guitar.obj) because depth barely varies, so the pattern is
+# effectively 2D and lines up with what the eye sees as "diagonal". On a
+# voluminous, articulated mesh (demo/shic tested this on SHIC's bear.obj,
+# 4936v) it does not: walking around a limb's circular cross-section changes x
+# and y quickly over a short physical distance, so the cell index cycles
+# several times per limb and the bands SPIRAL around legs/torso instead of
+# running as flat diagonal stripes -- confirmed by coarsening the grid
+# (6/8/16 all show the same spiraling, so it is not a resolution problem).
+#
+# FIX: replace raw xyz with the mesh's own low-frequency Laplace-Beltrami
+# eigenfunctions as the three coordinates. These are smooth scalar fields
+# defined by the mesh's EDGE CONNECTIVITY (solutions of L f = lambda M f for
+# the cotangent-weight Laplacian L and the lumped-area mass matrix M), so a
+# short walk along the actual surface -- around a limb's circumference, versus
+# along its length -- changes them at very different rates by construction:
+# low modes vary slowly across a limb's short way round and only pick up
+# structure over the mesh's longer geodesic extent. That is exactly the
+# "distance along the surface, not straight-line xyz" property the spiral
+# diagnosis calls for, at a fraction of the cost of a real geodesic-distance
+# field (see analysis/build_geodesic_tables.py's heat-method solve, which this
+# deliberately does not reuse: it is built for one V x V table, not a
+# smooth low-rank coordinate basis).
+#
+# COST: sparse partial eigensolve (scipy ARPACK, shift-invert near 0) for the
+# 4 smallest eigenpairs (1 trivial + 3 used) -- under 1s on both the guitar
+# (3886v) and this bear (4936v). The naive alternative, spharapy's own
+# SpharaBasis.basis() (dense scipy.linalg.eigh over ALL V eigenpairs, what
+# demo/shic's own weights were likely built with), took 136s on the same bear
+# mesh for the same 4 leading eigenvalues -- confirmed matching (7.67 vs 7.68,
+# 14.35 vs 14.39): this is the same math, not an approximation, just not
+# wasting time on the V-4 eigenpairs nothing here uses.
+#
+# BINNING: raw eigenfunction values are NOT uniformly distributed (measured on
+# the bear: eig3's 30th-70th percentile spans -0.076 to 0.076, i.e. ~40% of
+# vertices crowd one narrow band) -- fixed-width cells (checker_grid's
+# approach, fine for a roughly-uniform-density mesh in xyz) would dump most of
+# the mesh into 1-2 bins. Cells are quantile-binned instead, per coordinate
+# independently, so every bin holds a roughly equal share of vertices
+# regardless of the eigenfunction's own distribution.
+#
+# NOT SUPPORTED: --split_faces. split_faces_on_cells clips triangles against
+# axis-ALIGNED xyz planes; a per-vertex scalar field has no such plane, and
+# clipping against it would mean interpolating (and re-clipping against) all
+# three eigenfunction values along every cut edge, not just position. Flat
+# per-face coloring works today; the clean split-boundary version is future
+# work if this direction is kept (see PROJECT_NOTES.md 2026-09-03).
+def compute_lbo_coords(verts, faces, k=3):
+    """Returns [V, 3] float64: the `k` smallest-NONTRIVIAL Laplace-Beltrami
+    eigenfunctions of the mesh, zero-padded to 3 columns if k < 3 (so the
+    diagonal-rule machinery below, which always indexes 3 axes, is unchanged).
+
+    Cotangent-weight Laplacian + barycentric-lumped mass matrix (the standard
+    discretization -- Meyer et al. 2003 / Pinkall & Polthier 1993's cotan
+    formula); generalized eigenproblem L f = lambda M f solved for the
+    smallest `k + 1` eigenpairs via shift-invert ARPACK (sigma near 0), then
+    the first (trivial, constant, eigenvalue ~0) eigenvector is dropped.
+    """
+    if not (1 <= k <= 3):
+        raise ValueError(f'--checker_lbo_k must be 1, 2 or 3 (got {k})')
+    verts = np.asarray(verts, dtype=np.float64)
+    faces = np.asarray(faces, dtype=np.int64)
+    n = verts.shape[0]
+
+    rows, cols, vals = [], [], []
+    area = np.zeros(n)
+    for i, j, m in faces:
+        vi, vj, vm = verts[i], verts[j], verts[m]
+
+        def cot_angle(a, b, c):  # angle at a, opposite edge b-c
+            u, w = b - a, c - a
+            cosang = np.dot(u, w)
+            sinang = np.linalg.norm(np.cross(u, w))
+            return cosang / max(sinang, 1e-12)
+
+        cot_i, cot_j, cot_m = cot_angle(vi, vj, vm), cot_angle(vj, vm, vi), cot_angle(vm, vi, vj)
+        for a, b, w in ((j, m, cot_i), (m, i, cot_j), (i, j, cot_m)):
+            rows += [a, b]; cols += [b, a]; vals += [0.5 * w, 0.5 * w]
+        tri_area = 0.5 * np.linalg.norm(np.cross(vj - vi, vm - vi))
+        area[i] += tri_area / 3; area[j] += tri_area / 3; area[m] += tri_area / 3
+
+    W = sp.coo_matrix((vals, (rows, cols)), shape=(n, n)).tocsr()
+    L = sp.diags(np.asarray(W.sum(axis=1)).flatten()) - W
+    M = sp.diags(np.maximum(area, 1e-12))
+
+    eigvals, eigvecs = spla.eigsh(L.tocsc(), k=k + 1, M=M.tocsc(), sigma=-1e-6, which='LM')
+    order = np.argsort(eigvals)
+    coords = eigvecs[:, order[1:k + 1]]  # drop the trivial constant mode (smallest eigenvalue)
+    if k < 3:
+        coords = np.concatenate([coords, np.zeros((n, 3 - k))], axis=1)
+    print(f'LBO coords: k={k}, eigenvalues used = {np.round(eigvals[order[1:k + 1]], 4)} '
+          f'(trivial mode {eigvals[order[0]]:.2e} dropped)')
+    return coords
+
+
+def quantile_grid(coords, grid):
+    """Per-column quantile bin edges, [grid + 1] each -- the LBO counterpart of
+    checker_grid's fixed-width cells (see the module note above for why LBO
+    coordinates need quantile rather than linear binning)."""
+    edges = []
+    for c in range(coords.shape[1]):
+        col = coords[:, c]
+        if np.allclose(col, col[0]):  # a zero-padded unused axis (k < 3)
+            edges.append(np.array([col[0] - 1.0, col[0] + 1.0]))
+            continue
+        e = np.quantile(col, np.linspace(0, 1, grid + 1))
+        e[0] -= 1e-9; e[-1] += 1e-9
+        edges.append(e)
+    return edges
+
+
+def quantile_cell_index(points, edges):
+    idx = np.zeros(points.shape, dtype=np.int64)
+    for c in range(points.shape[1]):
+        idx[:, c] = np.clip(np.digitize(points[:, c], edges[c][1:-1]), 0, len(edges[c]) - 2)
+    return idx
+# ---------------------------------------------------------------------------
 
 
 def checker_grid(verts, grid):
@@ -287,7 +412,107 @@ def split_faces_on_cells(verts, faces, min_xyz, cell_size, min_area=1e-12):
     return new_verts, new_faces
 
 
-def checker_colors(verts, faces, grid, pattern, seed, split_faces):
+# ---------------------------------------------------------------------------
+# --checker_coords uv (2026-09-03, Tal): the REAL fix for demo/shic's bear.obj, found after
+# --checker_coords lbo above turned out to only be a partial one.
+#
+# THE STORY, kept because this will get reused (Tal: "תזכור איך עשינו את זה"). SHIC's own
+# bear.obj/horse.obj/elephant.obj carry ZERO `vt` (UV) entries -- confirmed by grep -- so there is
+# no shipped surface parameterization to texture against. But these are DensePose CSE's canonical
+# meshes by name and vertex count (bear_4936 etc.), and DensePose's OWN release
+# (facebookresearch/detectron2, densepose/data/meshes/builtin.py) publishes real per-vertex UV for
+# them at a fixed URL -- see analysis/fetch_densepose_uv.py, which downloads it. Vertex
+# correspondence between SHIC's .obj and DensePose's UV was verified before trusting it: indexing
+# DensePose's UV by SHIC's own vertex order, >94% of mesh EDGES land within 0.1 UV units of each
+# other (median 0.008) -- consistent with a real continuous parameterization, not a coincidence.
+# (The matching DensePose GEOMETRY .pkl is a dead end -- unpickles to an all-zero array in this
+# environment, correct shape/dtype, no content; documented in fetch_densepose_uv.py so nobody
+# re-diagnoses it. Apply the UV directly to SHIC's own geometry instead, which is what this does.)
+#
+# EVEN WITH REAL UV, A NAIVE PER-FACE-CENTROID CHECKER STILL LOOKED WRONG -- jagged, sawtooth
+# boundaries, not the clean squares of the reference figure. The cause was NOT the UV (grid=16 with
+# real UV, no clipping, still looked broken) -- it was the same gap that --split_faces already
+# exists to close for the xyz mode: coloring a whole triangle by its centroid's cell means any
+# triangle straddling a cell boundary paints its ENTIRE area the wrong side's color, and on a UV
+# atlas triangles routinely straddle boundaries because chart density is not uniform. The fix is
+# `split_faces_on_uv_cells` below -- the direct UV-space counterpart of `split_faces_on_cells`,
+# built by reusing `_clip_polygon_below` UNCHANGED (it already indexes generically by axis, so
+# clipping a [x, y, z, u, v] point against axis 3 or 4 needed no new clipping math at all).
+def load_uv(uv_path, num_vertices):
+    """[V, 2] float64 in [0, 1] from a .pkl/.npy/.pth file (a bare array, or a dict with a
+    'uv'/'vertices' key -- accepts analysis/fetch_densepose_uv.py's output as-is)."""
+    if uv_path.endswith('.npy'):
+        uv = np.load(uv_path)
+    else:
+        import pickle
+        with open(uv_path, 'rb') as f:
+            try:
+                uv = pickle.load(f, encoding='latin1')
+            except Exception:
+                uv = torch.load(uv_path, map_location='cpu')
+    if isinstance(uv, dict):
+        uv = uv.get('uv', uv.get('vertices'))
+    if torch.is_tensor(uv):
+        uv = uv.numpy()
+    uv = np.asarray(uv, dtype=np.float64)
+    if uv.shape != (num_vertices, 2):
+        raise ValueError(f'{uv_path}: expected [{num_vertices}, 2], got {uv.shape} -- wrong mesh, '
+                         'or vertex correspondence does not hold (see this module\'s uv note)')
+    return uv
+
+
+def split_faces_on_uv_cells(verts, faces, uv, grid, min_area=1e-14):
+    """UV counterpart of split_faces_on_cells: clips every triangle at the UV grid lines k/grid
+    (k=1..grid-1) on both axes, so no output triangle straddles a cell boundary. Grid lines are
+    fixed at k/grid (UV is already normalized to [0, 1] by convention -- unlike xyz there is no
+    mesh-dependent min/cell_size to derive).
+
+    Reuses _clip_polygon_below UNCHANGED against a 5-component [x, y, z, u, v] point per corner, so
+    position is carried through every clip for free and the final triangles still have real 3D
+    geometry, just cut along UV-space lines.
+
+    Returns (new_verts [3T, 3] float32, new_faces [T, 3], centroid_uv [T, 2]) -- the last one takes
+    the place of checker_cell_index's per-piece id lookup, since each clipped triangle already sits
+    fully inside one UV cell and its own centroid names that cell exactly.
+    """
+    tris = [np.concatenate([verts[f], uv[f]], axis=1).astype(np.float64) for f in faces]  # [3,5] each
+    for axis in (3, 4):
+        pieces = []
+        for poly in tris:
+            coords = np.array([p[axis] for p in poly])
+            k_lo = int(np.floor(coords.min() * grid))
+            k_hi = int(np.floor(coords.max() * grid))
+            remainder = list(poly)
+            for k in range(k_lo + 1, k_hi + 1):
+                if len(remainder) < 3:
+                    break
+                plane = k / grid
+                below, remainder = _clip_polygon_below(remainder, axis, plane)
+                if len(below) >= 3:
+                    pieces.append(below)
+            if len(remainder) >= 3:
+                pieces.append(remainder)
+        tris = pieces
+
+    out_tris = []
+    for poly in tris:
+        poly = np.asarray(poly, dtype=np.float64)
+        for i in range(1, len(poly) - 1):  # fan triangulation of a convex piece
+            tri = np.stack([poly[0], poly[i], poly[i + 1]])
+            pos = tri[:, :3]
+            area = 0.5 * np.linalg.norm(np.cross(pos[1] - pos[0], pos[2] - pos[0]))
+            if area > min_area:  # drop slivers created exactly on a plane
+                out_tris.append(tri)
+
+    out = np.concatenate(out_tris, axis=0)
+    new_verts = out[:, :3].astype(np.float32)
+    centroid_uv = out[:, 3:5].reshape(-1, 3, 2).mean(axis=1)
+    new_faces = np.arange(new_verts.shape[0], dtype=np.int64).reshape(-1, 3)
+    return new_verts, new_faces, centroid_uv
+# ---------------------------------------------------------------------------
+
+
+def checker_colors(verts, faces, grid, pattern, seed, split_faces, coord_source='xyz', lbo_k=3, uv=None):
     """Returns (vertex_colors [V, 3], face_colors [F, 3], split), all colors
     uint8. `split` is None unless `split_faces`, in which case it is
     (split_verts, split_faces, split_colors): the clipped display geometry with
@@ -296,20 +521,66 @@ def checker_colors(verts, faces, grid, pattern, seed, split_faces):
     A face's color comes from the cell its *centroid* falls in, and every set of
     colors comes from one shared cell->color assignment, so the flat, split and
     smooth versions of the same run agree wherever they can.
+
+    `coord_source`: 'xyz' (default, unchanged original behavior -- fixed-width
+    cells over raw vertex position), 'lbo' (see the module note above
+    compute_lbo_coords: quantile-binned Laplace-Beltrami eigenfunctions,
+    intrinsic to the surface -- fixes the spiral artifact 'xyz' shows on
+    voluminous/articulated meshes; `split_faces` is not supported with 'lbo'),
+    or 'uv' (see the module note above load_uv/split_faces_on_uv_cells: real
+    per-vertex UV, e.g. from analysis/fetch_densepose_uv.py, passed as `uv`
+    [V, 2] in [0, 1] -- linear cells, split_faces fully supported and
+    strongly recommended, see that note for why the unsplit version looks
+    wrong even with correct UV).
     """
-    min_xyz, cell_size, max_cell = checker_grid(verts, grid)
+    if coord_source == 'lbo':
+        if split_faces:
+            raise ValueError("--split_faces is not supported with --checker_coords lbo "
+                             "(split_faces_on_cells clips against xyz planes only) -- "
+                             "pass --no_split_faces, or use --checker_shading smooth")
+        coords = compute_lbo_coords(verts, faces, k=lbo_k)
+        edges = quantile_grid(coords, grid)
 
-    def cells_of(points):
-        cell = checker_cell_index(points, min_xyz, cell_size, max_cell)
-        return [tuple(int(c) for c in row) for row in cell]
+        def cells_of(points_coords):
+            cell = quantile_cell_index(points_coords, edges)
+            return [tuple(int(c) for c in row) for row in cell]
 
-    vertex_ids = cells_of(verts)
-    face_ids = cells_of(np.asarray(verts)[faces].mean(axis=1))
+        vertex_ids = cells_of(coords)
+        face_ids = cells_of(coords[faces].mean(axis=1))
+        split_verts = split_face_idx = split_ids = None
+        max_cell_repr = f'{grid} quantile bins per axis (k={lbo_k})'
+    elif coord_source == 'uv':
+        if uv is None:
+            raise ValueError("--checker_coords uv requires --uv_path (a [V, 2] array in [0, 1])")
 
-    split_verts = split_face_idx = split_ids = None
-    if split_faces:
-        split_verts, split_face_idx = split_faces_on_cells(verts, faces, min_xyz, cell_size)
-        split_ids = cells_of(split_verts[split_face_idx].mean(axis=1))
+        def uv_cell(points_uv):
+            i = np.clip((points_uv[:, 0] * grid).astype(np.int64), 0, grid - 1)
+            j = np.clip((points_uv[:, 1] * grid).astype(np.int64), 0, grid - 1)
+            k = np.zeros_like(i)  # UV is 2D; the diagonal rule's 3rd (depth) axis is unused
+            return [tuple(row) for row in np.stack([i, j, k], axis=1).tolist()]
+
+        vertex_ids = uv_cell(uv)
+        face_ids = uv_cell(uv[faces].mean(axis=1))
+        split_verts = split_face_idx = split_ids = None
+        if split_faces:
+            split_verts, split_face_idx, centroid_uv = split_faces_on_uv_cells(verts, faces, uv, grid)
+            split_ids = uv_cell(centroid_uv)
+        max_cell_repr = f'{grid}x{grid} UV cells'
+    else:
+        min_xyz, cell_size, max_cell = checker_grid(verts, grid)
+
+        def cells_of(points):
+            cell = checker_cell_index(points, min_xyz, cell_size, max_cell)
+            return [tuple(int(c) for c in row) for row in cell]
+
+        vertex_ids = cells_of(verts)
+        face_ids = cells_of(np.asarray(verts)[faces].mean(axis=1))
+
+        split_verts = split_face_idx = split_ids = None
+        if split_faces:
+            split_verts, split_face_idx = split_faces_on_cells(verts, faces, min_xyz, cell_size)
+            split_ids = cells_of(split_verts[split_face_idx].mean(axis=1))
+        max_cell_repr = f'cells per axis: {max_cell + 1}, cell size {cell_size:.4f}'
 
     # Every cell that any of the three sets touches has to be colored before the
     # greedy `patchwork` assignment runs, or a clipped sliver could land in a
@@ -321,9 +592,8 @@ def checker_colors(verts, faces, grid, pattern, seed, split_faces):
     palette = np.array(CHECKER_PALETTE, dtype=np.uint8)
     paint = lambda ids: palette[np.array([cell_color[c] for c in ids], dtype=np.int64)]
 
-    print(f'checkerboard ({pattern}): {len(cell_color)} occupied cells across {len(palette)} palette colors, '
-          f'{grid} cells along the longest bounding-box axis '
-          f'(cells per axis: {max_cell + 1}, cell size {cell_size:.4f})')
+    print(f'checkerboard ({pattern}, coords={coord_source}): {len(cell_color)} occupied cells across '
+          f'{len(palette)} palette colors, {grid} cells along the longest bounding-box axis ({max_cell_repr})')
 
     split = None
     if split_faces:
@@ -335,7 +605,12 @@ def checker_colors(verts, faces, grid, pattern, seed, split_faces):
 
 
 def main(args):
-    mesh = Mesh(args.obj_path)
+    # loadmesh, NOT a bare Mesh(): the bare constructor returns RAW file coordinates and so bypasses
+    # both the standard normalization and any `<mesh>.normalizer.json` sidecar, which meant the .ply
+    # this writes was in a different frame from everything else built off the same mesh (2026-09-02).
+    # A no-op for meshes/guitar.obj, whose normalizer is exactly the identity -- every .ply already
+    # on disk is unchanged by this.
+    mesh = loadmesh(dir=args.obj_path, name=os.path.splitext(os.path.basename(args.obj_path))[0])
     verts = mesh.vertices.detach().cpu().numpy()
     faces = mesh.faces.detach().cpu().numpy()
     num_vertices = verts.shape[0]
@@ -344,7 +619,9 @@ def main(args):
     if args.mode != 'checker':
         mode_tag = args.mode
     else:
-        mode_tag = (f'checker{args.grid}'
+        coord_tag = ('' if args.checker_coords == 'xyz' else
+                    f'_lbo{args.checker_lbo_k}' if args.checker_coords == 'lbo' else '_uv')
+        mode_tag = (f'checker{args.grid}' + coord_tag
                     + ('' if args.checker_pattern == 'diagonal' else f'_{args.checker_pattern}')
                     + ('' if args.checker_shading == 'flat' else '_smooth'))
     output_path = args.output_path or os.path.join(
@@ -369,9 +646,21 @@ def main(args):
                               f'fewer than n_components={args.n_components}')
         vertex_colors = pca_colors(features, args.n_components, args.random_state)
     else:
+        # --checker_coords lbo never supports the clipped-boundary geometry (see
+        # checker_colors' docstring) -- forced off here rather than requiring
+        # --no_split_faces to be remembered every time. uv DOES support it (and should
+        # basically always use it -- see the uv module note for why the unsplit version
+        # looked broken even with correct UV).
+        want_split = (args.split_faces and args.checker_shading == 'flat'
+                     and args.checker_coords != 'lbo')
+        uv = None
+        if args.checker_coords == 'uv':
+            if not args.uv_path:
+                raise ValueError('--checker_coords uv requires --uv_path')
+            uv = load_uv(args.uv_path, num_vertices)
         vertex_colors, face_colors, split = checker_colors(
             verts, faces, args.grid, args.checker_pattern, args.seed,
-            split_faces=args.split_faces and args.checker_shading == 'flat')
+            split_faces=want_split, coord_source=args.checker_coords, lbo_k=args.checker_lbo_k, uv=uv)
 
     print(f'mesh: {num_vertices} vertices, {faces.shape[0]} faces, mode: {args.mode}')
 
@@ -413,6 +702,9 @@ def main(args):
         'seed': args.seed if args.mode == 'checker' else None,
         'shading': args.checker_shading if args.mode == 'checker' else None,
         'pattern': args.checker_pattern if args.mode == 'checker' else None,
+        'coords': args.checker_coords if args.mode == 'checker' else None,
+        'lbo_k': args.checker_lbo_k if (args.mode == 'checker' and args.checker_coords == 'lbo') else None,
+        'uv_path': args.uv_path if (args.mode == 'checker' and args.checker_coords == 'uv') else None,
         'split_faces': split is not None,
         'vertex_features_path': args.vertex_features_path if args.mode == 'pca' else None,
     }, colors_output_path)
@@ -450,6 +742,28 @@ if __name__ == '__main__':
                               'smaller squares. Keep cells comfortably above the mesh edge length: '
                               'once a cell is only a few triangles wide the patches stop reading as '
                               'squares whatever the shading.')
+    parser.add_argument('--checker_coords', type=str, choices=['xyz', 'lbo', 'uv'], default='xyz',
+                         help='--mode checker only. xyz (default): fixed-width cells over raw '
+                              'vertex position -- clean diagonal bands on a near-planar mesh '
+                              '(meshes/guitar.obj), but SPIRALS around limbs on a voluminous / '
+                              'articulated mesh (confirmed on SHIC\'s bear.obj, 4936v). lbo: '
+                              'quantile-binned Laplace-Beltrami eigenfunctions instead -- intrinsic '
+                              'to the surface, fixes the spiral (see compute_lbo_coords\'s '
+                              'docstring for the full reasoning, 2026-09-03). Not compatible with '
+                              '--split_faces (forced off automatically). uv: real per-vertex UV '
+                              '(--uv_path required, e.g. from analysis/fetch_densepose_uv.py) -- '
+                              'the closest match to a real textured-mesh figure; USE WITH '
+                              '--split_faces (the default) or boundaries look jagged even with '
+                              'correct UV, see split_faces_on_uv_cells\'s docstring.')
+    parser.add_argument('--checker_lbo_k', type=int, default=3,
+                         help='--checker_coords lbo only. how many Laplace-Beltrami eigenfunctions '
+                              '(1-3) to use as coordinates; 3 gives the full diagonal rule, fewer '
+                              'zero-pad the unused axis/axes.')
+    parser.add_argument('--uv_path', type=str, default=None,
+                         help='--checker_coords uv only (required). Path to a [V, 2] UV array in '
+                              '[0, 1] -- .pkl (bare array or a dict with a \'uv\' key), .npy, or '
+                              '.pth. analysis/fetch_densepose_uv.py produces one for DensePose '
+                              'CSE\'s canonical meshes (bear_4936, horse_5004, elephant_5002, ...).')
     parser.add_argument('--checker_pattern', type=str, choices=['diagonal', 'patchwork'],
                          default='diagonal',
                          help='--mode checker only. diagonal (default): color index = '

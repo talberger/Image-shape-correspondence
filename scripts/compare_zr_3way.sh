@@ -22,7 +22,7 @@ SUMMARY=/tmp/zr_3way_summary.txt
 for RUN in fib1000 retrained frontcentered; do
   if [ "$RUN" = "fib1000" ]; then
     PRED_F=experiments/guitar/encoder_dino_fib1000/pred_f.pth
-    OUT=demo/guitar/bsb_fib1000_ZR
+    OUT=demo/guitar/runs/legacy/bsb_fib1000_ZR
     BACKPROJ=$OUT/back_projection
   elif [ "$RUN" = "retrained" ]; then
     PRED_F=experiments/guitar/encoder_dino/pred_f.pth
@@ -30,7 +30,7 @@ for RUN in fib1000 retrained frontcentered; do
     BACKPROJ=$OUT/back_projection_ZR
   else
     PRED_F=experiments/guitar/encoder_dino_frontcentered/pred_f.pth
-    OUT=demo/guitar/bsb_frontcentered_ZR
+    OUT=demo/guitar/runs/legacy/bsb_frontcentered_ZR
     BACKPROJ=$OUT/back_projection
   fi
   mkdir -p "$OUT/pixel_to_vertex_nn" "$OUT/color_mesh_from_soft_mapping" "$BACKPROJ"

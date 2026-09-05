@@ -213,7 +213,13 @@ def position_colors_grid(mask_idx_row, mask_idx_col, grid=8):
 
 
 def build_output_image(shape_hw, mask_idx_row, mask_idx_col, pixel_colors,
-                        background_color, transparent_background):
+                        background_color, transparent_background, background_image=None):
+    """background_image (2026-09-03, Tal): [H, W, 3] uint8, the real photo -- when given, it
+    replaces the flat `background_color` fill everywhere OUTSIDE the mask, so the back-projected
+    colors sit on the actual scene instead of blank white. `background_color` still applies
+    outside the mask when this is None (unchanged default), and still supplies the RGB channels
+    under a transparent background (alpha is what makes it invisible there, so the source photo
+    would be redundant -- background_image is ignored when transparent_background is set)."""
     h, w = shape_hw
     if transparent_background is not None:
         img = np.zeros((h, w, 4), dtype=np.uint8)
@@ -223,7 +229,12 @@ def build_output_image(shape_hw, mask_idx_row, mask_idx_col, pixel_colors,
         img[mask_idx_row, mask_idx_col, 3] = 255
     else:
         img = np.zeros((h, w, 3), dtype=np.uint8)
-        img[:, :] = background_color
+        if background_image is not None:
+            if background_image.shape[:2] != (h, w):
+                raise ValueError(f'background_image {background_image.shape[:2]} != mask shape {(h, w)}')
+            img[:, :] = background_image
+        else:
+            img[:, :] = background_color
         img[mask_idx_row, mask_idx_col] = pixel_colors
 
     return img

@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import torch
@@ -14,6 +15,7 @@ import copy
 import numpy as np
 from pathlib import Path
 from modules.Normalization import MeshNormalizer
+from modules.Normalization.Normalizer import Normalizer
 from modules.mesh import Mesh
 
 if torch.cuda.is_available():
@@ -244,11 +246,46 @@ def build_ring_dict(faces):
     
     return ring_dict
 
+def load_mesh_normalizer_spec(obj_path):
+    """Optional per-mesh normalization override, read from `<obj_path minus extension>.normalizer.json`.
+
+    Why a SIDECAR and not a CLI flag (2026-09-02): loadmesh is called from ~30 scripts here, almost
+    none of which thread a normalization option, and every one of them must agree on the frame or
+    the results are silently wrong -- that is exactly the failure mode this project hit three times
+    on the day the isotropic mesh landed. A sidecar makes the frame a property of the MESH FILE, so
+    every caller gets it automatically whether or not it knew to ask.
+
+    Missing sidecar => the historical centroid-centred normalizer, unchanged. Recognized contents:
+      {"center": "bbox"}      bounding-box centre (sampling-independent, see Normalizer)
+      {"center": "centroid"}  the default, stated explicitly
+    """
+    spec_path = os.path.splitext(obj_path)[0] + '.normalizer.json'
+    if not os.path.exists(spec_path):
+        return None
+    with open(spec_path) as fh:
+        spec = json.load(fh)
+    center = spec.get('center', 'centroid')
+    if center not in ('bbox', 'centroid'):
+        raise ValueError(f'{spec_path}: unknown "center" {center!r} (expected "bbox" or "centroid")')
+    return center
+
+
 def loadmesh(dir, name, load_rings=False):
-    
+
     mesh = Mesh(dir)
     mesh.name = name
-    MeshNormalizer(mesh)()
+    center = load_mesh_normalizer_spec(dir)
+    if center == 'bbox':
+        # Announced on every load: the frame a mesh lives in is not visible in any output file, and
+        # mixing frames is silent (a shifted mesh still renders, still trains, still evaluates).
+        print(f'loadmesh: {dir} -> BOUNDING-BOX-centred normalization ({os.path.splitext(dir)[0]}.normalizer.json)')
+        normalizer = Normalizer.get_bounding_sphere_normalizer_bbox(mesh.vertices)
+        mesh.vertices = normalizer(mesh.vertices)
+        # Stops color_mesh/setcolor_mesh/arbcolor_mesh re-normalizing this mesh back into the
+        # centroid frame on every colour update -- see MeshNormalizer.__call__.
+        mesh.frame_locked = True
+    else:
+        MeshNormalizer(mesh)()
     
     if load_rings:
         rows_for_each_vertex = {}

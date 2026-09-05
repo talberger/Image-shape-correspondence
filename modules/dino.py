@@ -72,7 +72,8 @@ class DINOWrapper(ModelWrapper):
 
         return images
     
-    def postprocess_features(self, features, input_size, original_size):
+    def postprocess_features(self, features, input_size, original_size,
+                             fix_grid_alignment=False, patch_stride=None):
         """
         Remove padding and upscale features to the original image size.
 
@@ -85,7 +86,33 @@ class DINOWrapper(ModelWrapper):
           (torch.Tensor): Batched masks in BxCxHxW format, where (H, W)
             is given by original_size.
         """
-        features = F.interpolate(features, (self.target_size, self.target_size), mode="bilinear", align_corners=False)
+        # --- Tal edit start (2026-08-27): optional patch-grid alignment fix ---
+        # The default branch below resizes the n x n token grid straight to target_size, which
+        # implicitly assumes cell i is centred at (i + 0.5) * target_size / n. The TRUE centre of a
+        # token is patch_size/2 + i * stride. Those two agree exactly when stride == patch_size
+        # (16 cells of 14 px -> 14i + 7 either way), which is why this has always been correct in
+        # production -- but they diverge for any smaller stride (the overlapping-patch / "stride
+        # trick" setting), producing a STRETCH about the image centre: measured on the 1080x810
+        # photo at stride 7, up to 22 px (2.06%) at the edges, and 3.11% on the 64x64 render
+        # targets. See demo/guitar/features_analyze/problem_a_alignment.png.
+        #
+        # fix_grid_alignment=True resizes instead to exactly the extent the cells cover --
+        # (n-1)*stride + 1 samples spanning patch_size/2 .. patch_size/2 + (n-1)*stride -- and
+        # replicate-pads the patch_size/2 margins. Correct for ANY stride. Left OFF by default so
+        # every existing run stays bit-identical; pass it explicitly.
+        if fix_grid_alignment:
+            k = self.patch_size()
+            s = k if patch_stride is None else patch_stride
+            n_h, n_w = features.shape[-2:]
+            span_h, span_w = (n_h - 1) * s + 1, (n_w - 1) * s + 1
+            features = F.interpolate(features, (span_h, span_w), mode="bilinear", align_corners=True)
+            before = k // 2
+            features = F.pad(features, (before, self.target_size - span_w - before,
+                                        before, self.target_size - span_h - before),
+                             mode="replicate")
+        else:
+            features = F.interpolate(features, (self.target_size, self.target_size), mode="bilinear", align_corners=False)
+        # --- Tal edit end ---
         features = features[..., :input_size[0], :input_size[1]]
         features = F.interpolate(features, original_size, mode="bilinear", align_corners=False)
         return features

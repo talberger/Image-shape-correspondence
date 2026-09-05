@@ -70,7 +70,7 @@ class PairedXYZFeatureDataset(Dataset):
             f"view {i}: xyz_bary_f/dino_sd_f cache elev/azim mismatch -- caches were not built "
             f"from the same random_viewing_angles.pt")
         xyz_f = xyz['model_f']  # [3, H, W]
-        feat_f = feat['model_f']
+        feat_f = feat['model_f'].float()  # cache may be float16 (--cache_dtype); always train in float32
         if feat_f.dim() == 4:
             # dino_sd_f's cached model_f keeps postprocess_features' own leading dim of 1
             # ([1, C, H, W], see train_encoder_dino_sd.py:87) -- unlike our xyz cache, which is

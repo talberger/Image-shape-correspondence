@@ -60,6 +60,9 @@ from modules.cycle_consistency_loss_soft import cycle_consistency_loss_soft
 from modules.vertex_balance_loss import vertex_balance_loss
 from modules.mapping_loss import (feature_drift, sample_center_pixels,
                                   sample_grid_center_pixels, soft_map_to_vertices)
+from modules.feature_rkd_loss import (feature_rkd_angle_loss, feature_rkd_distance_loss,
+                                      feature_rkd_pairwise_angle_loss, hard_feature,
+                                      measure_feature_mu_references, soft_feature)
 from modules.relational_loss import (build_segment_index, relational_loss, relational_loss_geodesic,
                                      sample_in_segment_neighbors, sample_out_segment_neighbors)
 from modules.utils import device, loadmesh
@@ -133,6 +136,54 @@ def measure_mu_3D_reference(encoder, vertices, coords, segment_ids, seg_idx, all
             draws.append(d_3D.mean().item())
 
     return sum(draws) / len(draws)
+
+
+def measure_feature_mu(encoder, vertices, coords, segment_ids, seg_idx, all_pixel_features,
+                      k_vertices_per_pixel, num_neighbors_in_segment, num_neighbors_out_segment,
+                      temperature=1.0, num_samples=5, student_mode='soft', mu_stat='mean'):
+    """The two FIXED feature-space normalizers feature_rkd_distance_loss() needs -- measured once, here,
+    from the untouched phase-1 encoder, before any phase-2 training happens.
+
+    Exactly the same construction, and the same reasoning, as measure_mu_3D_reference above: a
+    normalizer taken from the live batch every step cannot see all distances shrinking together in
+    proportion, which is how the original relational loss collapsed (PROJECT_NOTES.md 2026-08-10).
+    Averaged over `num_samples` independent neighbour draws for the same reason it is there.
+
+    The image side is frozen, so its mu is a genuine constant of the data; the mesh side is
+    measured from phase-1 and then held while the encoder moves away from it -- which is the point.
+
+    Returns (mu_img, mu_msh) as plain floats.
+    """
+    num_centers = coords.shape[0]
+    num_neighbors = num_neighbors_in_segment + num_neighbors_out_segment
+    with torch.no_grad():
+        vertex_features = encoder(vertices)
+        img_draws, msh_draws = [], []
+        for _ in range(num_samples):
+            neighbor_coords_in = sample_in_segment_neighbors(
+                coords, segment_ids, seg_idx, k=num_neighbors_in_segment)
+            neighbor_coords_out = sample_out_segment_neighbors(
+                coords, segment_ids, seg_idx, k=num_neighbors_out_segment)
+            neighbor_coords = torch.cat([neighbor_coords_in, neighbor_coords_out], dim=1)
+
+            all_coords = torch.cat([coords, neighbor_coords.reshape(-1, 2)], dim=0)
+            pixel_features = index_pixel_features(all_pixel_features, all_coords)
+            _, topk_idx, weights = soft_map_to_vertices(
+                pixel_features, vertex_features, vertices, k_vertices_per_pixel,
+                return_topk=True, temperature=temperature)
+
+            msh_all = (hard_feature if student_mode == 'argmax' else soft_feature)(
+                vertex_features, topk_idx, weights)
+            mu_img, mu_msh = measure_feature_mu_references(
+                pixel_features[:num_centers],
+                pixel_features[num_centers:].view(num_centers, num_neighbors, -1),
+                msh_all[:num_centers],
+                msh_all[num_centers:].view(num_centers, num_neighbors, -1),
+                stat=mu_stat)
+            img_draws.append(mu_img)
+            msh_draws.append(mu_msh)
+
+    return sum(img_draws) / len(img_draws), sum(msh_draws) / len(msh_draws)
 
 
 def compute_bbox_diagonals(coarse_mask, vertices):
@@ -241,6 +292,26 @@ def load_geodesic_table_2d(geo_table_2d_path, object_mask_path, coords, num_cent
            table_2d['geodesic_safe_mask'].numpy())
 
 
+def check_geo_table_3d_matches_mesh(table_3d, geo_table_3d_path, obj_path, num_vertices):
+    """Guard against running with a 3D geodesic table built for a DIFFERENT mesh.
+
+    Added 2026-09-02, when meshes/guitar_isotropic.obj entered the project. The 2D table has
+    validated itself against its own mask/centers since it was written (load_geodesic_table_2d);
+    the 3D table never did, because for a year there was only one mesh.
+
+    The vertex-count check alone is not enough. Two meshes can share a vertex count and be
+    completely different, and -- the reason this matters here -- modules.utils.loadmesh normalizes
+    by `mean(vertices)`, the vertex CENTROID, so two triangulations of the SAME surface do not even
+    live in the same coordinate frame. A mismatched table would not crash; it would silently train
+    against another mesh's distances. So the table's recorded obj_path is compared too.
+    """
+    if table_3d.shape[0] != num_vertices:
+        raise ValueError(
+            f'3D geodesic table {geo_table_3d_path} is {tuple(table_3d.shape)} but the mesh at '
+            f'{obj_path} has {num_vertices} vertices -- the table was built for a different mesh. '
+            f'Rebuild it with scripts/build_geo_table_3d_only.py --obj_path {obj_path}')
+
+
 def load_geodesic_tables(geo_table_3d_path, geo_table_2d_path, object_mask_path, coords,
                          num_center_pixels, seed, pool_mode=False):
     """Loads both precomputed tables (analysis/build_geodesic_tables.py) -- see
@@ -296,6 +367,14 @@ def save_loss_plot(losses, drifts, checkpoint_every, path):
 
 
 def train(args):
+    # Phase-2 was entirely unseeded until 2026-08-29: every torch.rand in the neighbour samplers
+    # drew from the global RNG, so the same recipe never reproduced itself. Seeded in TWO places
+    # -- here for the one-time setup draws (mu references, center sampling), and again immediately
+    # before the training loop so the training stream does NOT depend on how much RNG the setup
+    # happened to consume. That second reseed is what makes e.g. --feat_mu_mode fixed vs live a
+    # clean A/B: 'live' skips measure_feature_mu's 5 draws, which would otherwise shift every
+    # subsequent neighbour draw and confound the comparison.
+    torch.manual_seed(args.train_seed)
     mesh = loadmesh(dir=args.obj_path, name=args.name, load_rings=True)
     vertices = mesh.vertices
     print('device=%s  vertices=%s' % (device, tuple(vertices.shape)))
@@ -308,6 +387,18 @@ def train(args):
     # feature file below, and torch rejects a CUDA index against a CPU source.
     coarse_mask = torch.load(args.object_mask_path, map_location='cpu').numpy()
     fine_segments = torch.load(args.fine_seg_path, map_location='cpu').numpy()
+    if args.geodesic:
+        # Restrict to the largest connected component BEFORE sampling centers, matching
+        # analysis/build_geodesic_tables.py's own fix (2026-09-03, found on demo/shic's bear3
+        # mask: 5 components, one center landed on a dropped speck and build_2d_table crashed
+        # with "some sample centers are not on-object pixels"). MUST mirror that script's
+        # filtering exactly, or the centers sampled here will not match the geo_table_2d file's
+        # stored ones and load_geodesic_tables's own consistency check rejects the run. Gated on
+        # --geodesic only: Euclidean training never touches the 2D table and a speck center is
+        # harmless there (see build_2d_table's docstring) -- restricting unconditionally would
+        # silently change which centers existing Euclidean (guitar) runs draw, for no benefit.
+        from analysis.build_geodesic_tables import largest_connected_component
+        coarse_mask, _num_components = largest_connected_component(coarse_mask)
 
     if args.resample_centers:
         if args.cyc_weight > 0.0:
@@ -366,6 +457,15 @@ def train(args):
                                  candidate_coords if args.resample_centers else coords,
                                  args.num_center_pixels, args.seed,
                                  pool_mode=args.resample_centers)
+        check_geo_table_3d_matches_mesh(geo_table_3d, args.geo_table_3d_path, args.obj_path,
+                                        mesh.vertices.shape[0])
+        table_3d_obj = torch.load(args.geo_table_3d_path, map_location='cpu').get('obj_path')
+        if table_3d_obj is not None and os.path.realpath(table_3d_obj) != os.path.realpath(args.obj_path):
+            raise ValueError(
+                f'3D geodesic table {args.geo_table_3d_path} was built for {table_3d_obj} but this '
+                f'run uses --obj_path {args.obj_path}. Same vertex count is NOT enough: loadmesh '
+                f'normalizes by the vertex centroid, so two triangulations of the same surface sit '
+                f'in different coordinate frames. Point --geo_table_3d_path at this mesh\'s table.')
         geo_table_3d = geo_table_3d.to(device)
         print('  geodesic tables loaded: 3D %s (diagonal=%.5f), 2D %s (diagonal=%.5f)'
               % (tuple(geo_table_3d.shape), geo_diag_3d, tuple(geo_table_2d.shape), geo_diag_2d))
@@ -499,6 +599,47 @@ def train(args):
         print('  mu_3D reference (fixed, phase-1 encoder, averaged over %d draws): %.5f'
               % (args.mu_3d_reference_samples, mu_3D_reference))
 
+    # Feature-space RKD normalizers (added 2026-08-28). Measured from the same untouched phase-1
+    # encoder as mu_3D above, for the same anti-collapse reason. Skipped entirely when neither
+    # feature term is in use and nothing asked for their magnitudes.
+    mu_img_reference = mu_msh_reference = None
+    if (args.feat_dist_weight > 0.0 or args.feat_angle_weight > 0.0
+            or args.feat_pair_angle_weight > 0.0 or args.log_feature_terms):
+        if args.feat_mu_mode == 'fixed':
+            mu_img_reference, mu_msh_reference = measure_feature_mu(
+                encoder, vertices, coords, segment_ids, seg_idx, all_pixel_features,
+                args.k_vertices_per_pixel, args.num_neighbors_in_segment,
+                args.num_neighbors_out_segment, temperature=args.temperature,
+                num_samples=args.mu_3d_reference_samples,
+                student_mode=args.feat_student_mode, mu_stat=args.feat_mu_stat)
+            print('  feature-RKD mu references (fixed, phase-1 encoder, %d draws, stat=%s): '
+                  'mu_img=%.5f  mu_msh=%.5f'
+                  % (args.mu_3d_reference_samples, args.feat_mu_stat,
+                     mu_img_reference, mu_msh_reference))
+        else:
+            print('  feature-RKD mu: LIVE per batch (the RKD paper\'s own choice)')
+        print('  feature-RKD student: %s'
+              % ('ARGMAX (k=1, no mixing -- gradient lands on one vertex per pixel)'
+                 if args.feat_student_mode == 'argmax' else 'soft (weighted average over k)'))
+        print('  feature-RKD soft-map weights: %s'
+              % ('DETACHED (circularity test -- gradient can only move features)'
+                 if args.feat_detach_weights else 'attached (default)'))
+        # 2026-09-04: the pair-angle weight MUST be printed here too. It was missing when the flag
+        # was added, so a run with only the pair-angle term on printed "beta=0, gamma=0" and read
+        # as though no feature term were active at all -- exactly backwards.
+        print('  feature-RKD weights: beta (distance)=%g, gamma (3-point angle)=%g, '
+              'pair-angle (2-point)=%g%s'
+              % (args.feat_dist_weight, args.feat_angle_weight, args.feat_pair_angle_weight,
+                 '  [logging only, no feature term is in the optimized loss]'
+                 if (args.feat_dist_weight == 0.0 and args.feat_angle_weight == 0.0
+                     and args.feat_pair_angle_weight == 0.0) else ''))
+        print('  feature-RKD detach: features=%s, weights=%s  (gradFW = neither, '
+              'gradF = weights detached, gradW = features detached)'
+              % (args.feat_detach_features, args.feat_detach_weights))
+        if args.relational_weight == 0.0:
+            print('  *** relational_weight=0: the SPATIAL term is OFF -- nothing anchors the map '
+                  'to geometry (2026-09-04: this diverged when tried) ***')
+
     print('  distance_weight: %s' % (args.distance_weight or 'none (every pair weighted equally)'))
     print('  mu_3d_scale: %g%s' % (args.mu_3d_scale, ' (no-op)' if args.mu_3d_scale == 1.0 else ''))
     if args.balance_weight > 0.0:
@@ -512,6 +653,10 @@ def train(args):
 
     losses = []
     drifts = []
+    # See the note at the top of train(): decouples the per-step neighbour stream from the
+    # amount of RNG the setup above consumed.
+    torch.manual_seed(args.train_seed + 1)
+
     for step in range(1, args.num_iters + 1):
         optimizer.zero_grad()
 
@@ -558,7 +703,7 @@ def train(args):
             # point can't be used here the way it is for Euclidean distance.
             _, topk_idx, weights = soft_map_to_vertices(
                 pixel_features, vertex_features, vertices, args.k_vertices_per_pixel,
-                return_topk=True)
+                return_topk=True, temperature=args.temperature)
 
             center_topk_idx = topk_idx[:num_centers]
             center_weights = weights[:num_centers]
@@ -580,7 +725,7 @@ def train(args):
             # only controls whether they're handed back.
             soft_points, topk_idx, weights = soft_map_to_vertices(
                 pixel_features, vertex_features, vertices, args.k_vertices_per_pixel,
-                return_topk=True)
+                return_topk=True, temperature=args.temperature)
 
             center_points = soft_points[:num_centers]
             neighbor_points = soft_points[num_centers:].view(num_centers, num_neighbors, 3)
@@ -594,6 +739,83 @@ def train(args):
                 huber_delta=args.huber_delta)
 
         loss = args.relational_weight * loss
+
+        # --- feature-space RKD (added 2026-08-28) -------------------------------------------
+        # Two additive terms on the feature dimension, on top of the geometric relational loss
+        # above: total = alpha*relational + beta*RKD-D(features) + gamma*RKD-A(features).
+        # Both default to weight 0.0, so every pre-existing run is bit-identical.
+        # Computed whenever either weight is on OR --log_feature_terms is set, so their raw
+        # magnitudes can be read off a run that does not yet use them.
+        feat_dist_raw = feat_angle_raw = cos_gap = float('nan')
+        mu_img_live = mu_msh_live = float('nan')
+        if (args.feat_dist_weight > 0.0 or args.feat_angle_weight > 0.0
+            or args.feat_pair_angle_weight > 0.0 or args.log_feature_terms):
+            img_center = pixel_features[:num_centers]
+            img_neighbors = pixel_features[num_centers:].view(num_centers, num_neighbors, -1)
+            # --feat_detach_weights (2026-08-29): THE CIRCULARITY TEST. `weights` come from a softmax
+            # over image<->vertex feature similarity, i.e. from the very quantity this loss is trying
+            # to fix. Left attached, the loss has two ways down: genuinely improve vertex_features
+            # (what we want), or just reshuffle/sharpen the weights so the weighted averages land
+            # where it wants (what we do not). Detaching blocks the second path, so the loss can only
+            # fall by moving features. Only the FEATURE loss is affected -- the geometric relational
+            # loss uses center_points/neighbor_points and is untouched. The other soft_feature() call
+            # (measure_feature_mu) is under no_grad, so it is unaffected either way.
+            if args.feat_student_mode == 'argmax':
+                # k=1: no mixing at all, so --feat_detach_weights is irrelevant here (only the
+                # argmax INDEX is taken from `weights`, and an index carries no gradient).
+                msh_all = hard_feature(vertex_features, topk_idx, weights)
+            else:
+                # --feat_detach_features (2026-08-31, Tal): the MIRROR of --feat_detach_weights.
+                # Detaching the F values leaves w as the only route to the encoder, which is exactly
+                # the structure of the SPATIAL relational loss (its Sum w*X uses fixed vertex
+                # POSITIONS, so it has no value path at all). The gradient still reaches the encoder,
+                # because w is a softmax over f(i)*F computed from the live, undetached features.
+                msh_all = soft_feature(
+                    vertex_features.detach() if args.feat_detach_features else vertex_features,
+                    topk_idx,
+                    weights.detach() if args.feat_detach_weights else weights)
+            msh_center = msh_all[:num_centers]
+            msh_neighbors = msh_all[num_centers:].view(num_centers, num_neighbors, -1)
+
+            fd_loss, mu_img_live, mu_msh_live = feature_rkd_distance_loss(
+                img_center, img_neighbors, msh_center, msh_neighbors,
+                mu_img_reference=mu_img_reference, mu_msh_reference=mu_msh_reference,
+                huber_delta=args.huber_delta)
+            fa_loss, cos_gap = feature_rkd_angle_loss(
+                img_center, img_neighbors, msh_center, msh_neighbors,
+                huber_delta=args.huber_delta)
+            # PAIRWISE (2-point) angle, Tal's variant 2026-09-04 -- cos(center, neighbour), one
+            # per pair, no mu anywhere. See feature_rkd_pairwise_angle_loss' docstring for how it
+            # differs from the 3-point fa_loss above. Always COMPUTED when the block runs (it is a
+            # cheap [n,k] cosine) so its raw magnitude is logged even at weight 0 -- that is how the
+            # weight gets chosen, rather than guessed.
+            #
+            # --feat_pair_angle_neighbors in_segment (Tal, 2026-09-04): use only the CLOSE
+            # neighbours. The neighbour axis is built as cat([in_segment, out_segment], dim=1) (see
+            # the sampling above), so the first --num_neighbors_in_segment entries ARE the close
+            # ones and a plain prefix slice is exactly right. THIS SLICE APPLIES TO THE PAIR-ANGLE
+            # TERM ONLY -- the geometric relational loss above still sees all 16, so the matched
+            # control (the spatial-only run) stays a ONE-variable comparison.
+            if args.feat_pair_angle_neighbors == 'in_segment':
+                n_close = args.num_neighbors_in_segment
+                pa_img_neighbors = img_neighbors[:, :n_close]
+                pa_msh_neighbors = msh_neighbors[:, :n_close]
+            else:
+                pa_img_neighbors = img_neighbors
+                pa_msh_neighbors = msh_neighbors
+            fpa_loss, pair_cos_gap = feature_rkd_pairwise_angle_loss(
+                img_center, pa_img_neighbors, msh_center, pa_msh_neighbors,
+                huber_delta=args.huber_delta)
+            feat_dist_raw = fd_loss.item()
+            feat_angle_raw = fa_loss.item()
+            feat_pair_angle_raw = fpa_loss.item()
+
+            if args.feat_dist_weight > 0.0:
+                loss = loss + args.feat_dist_weight * fd_loss
+            if args.feat_angle_weight > 0.0:
+                loss = loss + args.feat_angle_weight * fa_loss
+            if args.feat_pair_angle_weight > 0.0:
+                loss = loss + args.feat_pair_angle_weight * fpa_loss
 
         if args.balance_weight > 0.0:
             bal_loss, bal_f, bal_P = vertex_balance_loss(
@@ -628,10 +850,17 @@ def train(args):
             bal_str = ('' if args.balance_weight == 0.0 else
                       '  bal=%.4f cov=%d/%d' % (bal_loss.item(), int((bal_f > 0).sum().item()),
                                                  vertices.shape[0]))
-            print('step %4d/%d  loss %.6f (mu_2D=%.3f mu_3D_live=%.5f, ref_2D=%s ref_3D=%s)%s%s  '
+            feat_str = ('' if (args.feat_dist_weight == 0.0 and args.feat_angle_weight == 0.0
+                               and args.feat_pair_angle_weight == 0.0
+                               and not args.log_feature_terms) else
+                        '  featD=%.6f featA=%.6f featPA=%.6f (raw, unweighted; cos_gap=%.4f '
+                        'pair_cos_gap=%.4f mu_img_live=%.5f mu_msh_live=%.5f)'
+                        % (feat_dist_raw, feat_angle_raw, feat_pair_angle_raw, cos_gap,
+                           pair_cos_gap, mu_img_live, mu_msh_live))
+            print('step %4d/%d  loss %.6f (mu_2D=%.3f mu_3D_live=%.5f, ref_2D=%s ref_3D=%s)%s%s%s  '
                   'drift(cos vs phase 1) %.4f'
                   % (step, args.num_iters, loss.item(), mu_2D, mu_3D_live,
-                     ref_2D_str, ref_3D_str, cyc_str, bal_str, drift))
+                     ref_2D_str, ref_3D_str, cyc_str, bal_str, feat_str, drift))
 
             torch.save({'encoder_state_dict': encoder.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
@@ -718,6 +947,80 @@ if __name__ == '__main__':
                              'grid (sample_grid_center_pixels) -- must match the --center_mode '
                              'grid table\'s own --grid_stride it was built with '
                              '(analysis/build_geodesic_tables.py).')
+    parser.add_argument('--feat_dist_weight', type=float, default=0.0,
+                        help='beta -- weight of the feature-space RKD-D term (distance between two '
+                             'IMAGE features vs distance between the two corresponding MESH '
+                             'features). 0.0 = off, and every pre-existing run is bit-identical at '
+                             'the default. See modules/feature_rkd_loss.py.')
+    parser.add_argument('--feat_angle_weight', type=float, default=0.0,
+                        help='gamma -- weight of the feature-space RKD-A term (angle at a center, '
+                             'formed with two of its neighbours, in image-feature space vs in '
+                             'mesh-feature space). 0.0 = off. Needs no normalizer: a cosine is '
+                             'already scale-free.')
+    parser.add_argument('--feat_pair_angle_weight', type=float, default=0.0,
+                        help='weight of the PAIRWISE (2-point) feature angle term, Tal 2026-09-04: '
+                             'cos(center, neighbour) in image-feature space vs in mesh-feature '
+                             'space, ONE per (center, neighbour) pair -- the same 2-point structure '
+                             '--feat_dist_weight uses, with a cosine instead of a distance, so no '
+                             'mu is needed anywhere. NOT the same as --feat_angle_weight, which is '
+                             "the paper's 3-point angle between two NEIGHBOURS at the center. "
+                             'Intended as an ADDITIVE term alongside the geometric relational loss. '
+                             '0.0 = off, and the raw value is logged as featPA even at 0 so the '
+                             'weight can be chosen from a measurement. Start an order of magnitude '
+                             'below the 3-point term (gamma=0.2 collapsed a run).')
+    parser.add_argument('--feat_pair_angle_neighbors', type=str, default='all',
+                        choices=['all', 'in_segment'],
+                        help="which neighbours the PAIRWISE angle term uses. 'all' (default) = "
+                             'every sampled neighbour, i.e. in-segment + out-of-segment, and is '
+                             "bit-identical to every run before 2026-09-04. 'in_segment' = only the "
+                             'CLOSE ones (the first --num_neighbors_in_segment along the neighbour '
+                             'axis, which is built as cat([in, out]) so the prefix is exactly the '
+                             'in-segment set). Tal 2026-09-04. AFFECTS THE PAIR-ANGLE TERM ONLY -- '
+                             'the geometric relational loss still uses every neighbour, so a run '
+                             'with this flag differs from the spatial-only control by the '
+                             'pair-angle term alone.')
+    parser.add_argument('--feat_detach_weights', action='store_true',
+                        help='CIRCULARITY TEST: detach the soft-map weights inside soft_feature(), '
+                             'so the feature-RKD terms can only be reduced by changing vertex '
+                             'features, not by sharpening the mapping that produced them. Default '
+                             'OFF, so every pre-2026-08-29 run is reproduced exactly.')
+    parser.add_argument('--feat_student_mode', type=str, default='soft',
+                        choices=['soft', 'argmax'],
+                        help="how the feature-RKD terms reach the mesh. 'soft' (default) is the "
+                             'softmax-weighted average over k vertices, as every run before '
+                             "2026-09-01. 'argmax' takes the single best-matching vertex's own "
+                             'feature instead: no mixing, so there is no sharpening knob for the '
+                             "loss to exploit and a pixel's whole gradient lands on one vertex. "
+                             'See hard_feature() in modules/feature_rkd_loss.py.')
+    parser.add_argument('--feat_detach_features', action='store_true',
+                        help='detach the vertex FEATURES inside the soft student, so the feature-RKD '
+                             'gradient reaches the encoder only through the soft-map weights -- the '
+                             'mirror of --feat_detach_weights, and structurally what the spatial '
+                             'relational loss does. Soft student only (argmax takes an index, which '
+                             'carries no gradient, so detaching features there kills the term).')
+    parser.add_argument('--feat_mu_stat', type=str, default='mean',
+                        help="which statistic of the pair-distance distribution the FIXED feature "
+                             "normalizer uses: 'mean' (default, the paper's), 'max' (each space by "
+                             "its own largest pair distance), or 'pNN' e.g. 'p95'. max/p95 are much "
+                             "larger than the mean, so the loss shrinks and beta must be rescaled.")
+    parser.add_argument('--feat_mu_mode', type=str, default='fixed', choices=['fixed', 'live'],
+                        help="normalizer for the RKD-D feature term. 'fixed' (default) measures mu "
+                             'once from the phase-1 encoder and holds it, matching what the '
+                             'geometric relational loss already does and for the same '
+                             'anti-collapse reason. \'live\' recomputes it from each batch, which '
+                             'is what the RKD paper itself does -- kept as a flag because Tal '
+                             'explicitly wants to try it later.')
+    parser.add_argument('--log_feature_terms', action='store_true',
+                        help='compute and log the two feature-RKD terms unweighted even when both '
+                             'weights are 0, to read off their natural magnitudes before choosing '
+                             'beta/gamma. Costs one extra soft_feature + two losses per step and '
+                             'does NOT affect the optimized loss.')
+    parser.add_argument('--temperature', type=float, default=1.0,
+                         help='softmax temperature for soft_map_to_vertices (DPC Eq. 1-3). 1.0 = the '
+                               'plain softmax every phase-2 run before 2026-08-25 trained with. NOTE: '
+                               'the divide also scales the gradient reaching the encoder through the '
+                               'weights by 1/T, so T=0.005 is a 200x gradient amplification on that '
+                               'path, not just a sharper weighting -- treat lr accordingly.')
     parser.add_argument('--k_vertices_per_pixel', type=int, default=10,
                         help="mesh vertices each pixel is softly mapped onto, nearest in "
                              "FEATURE space (DPC's k_cc)")
@@ -892,6 +1195,12 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0,
                         help='must match the phase-1 seed -- it is what restores the '
                              'Fourier basis (see load_phase1_encoder)')
+    parser.add_argument('--train_seed', type=int, default=0,
+                        help='seeds the TRAINING-time RNG: the per-step neighbour resampling in '
+                             'sample_in_segment_neighbors/sample_out_segment_neighbors, which was '
+                             'unseeded until 2026-08-29 and is a real source of run-to-run spread '
+                             '(SEPARATE from --seed, which must keep matching phase-1). Change '
+                             'this, not --seed, to repeat a recipe and measure its noise floor.')
     parser.add_argument('--out_dir', type=str,
                         default='./experiments/guitar/encoder_dino_relational')
     args = parser.parse_args()

@@ -254,7 +254,8 @@ def build_adjacent_neighbors(coords, segment_ids, fine_segments, stride=1,
     return neighbor_coords, neighbor_valid
 
 
-def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k, return_topk=False):
+def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k, return_topk=False,
+                          temperature=1.0):
     """DPC Eq. 1-3: map each pixel to a soft point on the mesh surface.
 
     Differentiable end to end -- no detach anywhere, so gradients reach the
@@ -271,6 +272,18 @@ def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k, r
         return_topk      if True, ALSO return (topk_idx, weights) -- see below.
                           Default False: unchanged return value/behavior, for every
                           existing caller (byte-identical, no new allocation on that path).
+        temperature      softmax temperature T: weights = softmax(topk_similarity / T).
+                          Default 1.0 == the original plain softmax, byte-identical for
+                          every existing caller (the divide is skipped entirely at 1.0).
+                          Added 2026-08-25 because the plain softmax was MEASURED to be
+                          very nearly a no-op: cosine similarities within a pixel's top-k
+                          differ by only ~0.03 (median, over the 100-point eval set), and
+                          softmax concentrates as exp(difference), so it needs a gap of
+                          O(1) to do anything. Result was effective-k 9.999 out of 10
+                          across all 212,549 masked pixels -- i.e. a near-uniform average
+                          over the k candidates, with no ability to express confidence.
+                          T~0.01-0.02 is the range where the weights actually concentrate
+                          on this project's similarity scale.
 
     Returns [n, 3] soft-mapped points (return_topk=False, the original behavior), or
     (points [n, 3], topk_idx [n, k] long, weights [n, k] float) if return_topk=True --
@@ -290,7 +303,11 @@ def soft_map_to_vertices(pixel_features, vertex_features, vertex_positions, k, r
     similarity = pixel_features @ F.normalize(vertex_features, dim=-1).t()
 
     topk_similarity, topk_idx = torch.topk(similarity, k, dim=1)
-    weights = F.softmax(topk_similarity, dim=1)  # plain softmax, no temperature
+    # `is not 1.0`-style guard by value: at the default the divide is skipped so the
+    # existing training/analysis path is bit-for-bit what it was before temperature existed
+    if temperature != 1.0:
+        topk_similarity = topk_similarity / temperature
+    weights = F.softmax(topk_similarity, dim=1)
 
     # Average POSITIONS, not features: the loss measures distance on the
     # surface, which is only meaningful in coordinate space.

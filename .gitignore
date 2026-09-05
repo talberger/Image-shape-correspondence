@@ -7,3 +7,4 @@ SAM_repo/model_checkpoints/
 experiments*/
 .vscode/
 *.pyc
+logs/

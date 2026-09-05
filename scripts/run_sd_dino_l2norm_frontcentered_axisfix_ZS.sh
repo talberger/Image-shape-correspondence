@@ -16,7 +16,7 @@ PRED_F=experiments/guitar/encoder_dino_sd_frontcentered_l2norm_axisfix_phase1/pr
 CHECKER=demo/guitar/colored_mesh/guitar_mesh_checker16_color.pth
 MASKBASE=guitar_01_click_270_370_sam_mask_2
 
-OUT=demo/guitar/bsb_sd_dino_l2norm_frontcentered_axisfix_ZS
+OUT=demo/guitar/runs/legacy/bsb_sd_dino_l2norm_frontcentered_axisfix_ZS
 BACKPROJ=$OUT/back_projection
 mkdir -p "$OUT/pixel_to_vertex_nn" "$OUT/color_mesh_from_soft_mapping" "$BACKPROJ"
 

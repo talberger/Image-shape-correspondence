@@ -9,7 +9,7 @@ source /workspace/activate_bsb.sh
 # and "Current tracked-pixel set" lines.
 
 TRAIN_DIR=experiments/guitar/encoder_dino_relational_geodesic_mu3dscale1_frontcenteredinit_newmask
-OUT_ROOT=demo/guitar/bsb_relational_geodesic_mu3dscale1_frontcenteredinit_newmask
+OUT_ROOT=demo/guitar/runs/legacy/bsb_relational_geodesic_mu3dscale1_frontcenteredinit_newmask
 MASK=demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth
 PIXFEAT=demo/guitar/bsb_origin/guitar_01_pix_dino_features.pth
 POSCOLOR=demo/guitar/segment_masks_pixel270_370/pixel_coloring/guitar_01_click_270_370_sam_mask_2_position_color.png

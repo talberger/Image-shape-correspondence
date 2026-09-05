@@ -14,7 +14,7 @@ source /workspace/activate_bsb.sh
 # step folders land alongside it, same layout as the plain-DINO reference run.
 
 TRAIN_DIR=experiments/guitar/encoder_dino_sd_l2norm_relational_geodesic_mu3dscale1_phase2
-OUT_ROOT=demo/guitar/bsb_sd_dino_l2norm_relational_geodesic_mu3dscale1_phase2
+OUT_ROOT=demo/guitar/runs/legacy/bsb_sd_dino_l2norm_relational_geodesic_mu3dscale1_phase2
 MASK=demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth
 PIXFEAT=demo/guitar/features_analyze/dino_sd_poc/guitar_01_pix_dino_sd_features.pth
 POSCOLOR=demo/guitar/segment_masks_pixel270_370/pixel_coloring/guitar_01_click_270_370_sam_mask_2_position_color.png

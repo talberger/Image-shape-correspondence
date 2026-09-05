@@ -3,7 +3,7 @@ set -e
 source /workspace/activate_bsb.sh
 
 TRAIN_DIR=experiments/guitar/encoder_dino_relational_geodesic_mu3dscale1_bal1e-3
-OUT_ROOT=demo/guitar/bsb_relational_geodesic_mu3dscale1_bal1e-3
+OUT_ROOT=demo/guitar/runs/legacy/bsb_relational_geodesic_mu3dscale1_bal1e-3
 MASK=demo/guitar/bsb_origin/guitar_01_click_130_140_sam_mask_2.pth
 PIXFEAT=demo/guitar/bsb_origin/guitar_01_pix_dino_features.pth
 POSCOLOR=demo/guitar/bsb_retrained/pixel_coloring/guitar_01_click_130_140_sam_mask_2_position_color.png
