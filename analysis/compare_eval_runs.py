@@ -26,7 +26,6 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analysis.eval_geodesic_error import format_sources
 from modules.Normalization.Normalizer import Normalizer
 from modules.utils import load_mesh_normalizer_spec
 
@@ -167,47 +166,42 @@ def main(args):
     fig.suptitle(f'ground-truth evaluation, n={n} labeled points   '
                  f'(errors as % of mesh geodesic diameter D={D:.4f})', fontsize=11, y=0.985)
 
-    # Full source paths, one block per run (Tal, 2026-09-01). A comparison figure is the artifact
-    # that outlives the session -- without these, "baseline" or "T=0.01" on a legend is not enough
-    # to reconstruct months later WHICH pred_f and WHICH photo features produced the curve. Blocks
-    # are colored to match their curve, and stacked below the figure so tight bbox grows the PNG
-    # downward rather than squeezing the panels.
+    # ONE LINE PER RUN: the result .pth path (Tal, 2026-09-05 -- the previous four-line-per-run
+    # block was too much figure real estate). Nothing is lost: each result file carries every
+    # source path that produced its numbers, and `eval_geodesic_error.py --replot_from <file>`
+    # prints them back.
     #
-    # Shared sources (eval pairs, geodesic table, mesh) are deliberately NOT repeated per run:
-    # they are printed once at the end, and only when every run agrees on them -- if two runs were
-    # evaluated against different label sets the comparison is invalid, so a disagreement is
-    # printed per-run instead of being averaged away into a single reassuring line.
-    shared_keys = [('eval pairs', 'eval_pairs_path'), ('geodesic table', 'geo_table_path'),
-                   ('mesh', 'obj_path')]
-    shared = {lab: runs[0].get(key) for lab, key in shared_keys
-              if len({d.get(key) for d in runs}) == 1 and runs[0].get(key)}
+    # THE ONE THING THAT IS NOT DROPPED is the label-set check. Comparing runs evaluated against
+    # DIFFERENT label sets is invalid, and since 2026-09-05 two sets exist (v1, and the
+    # edge-inset v2 that scores ~2 AUC higher on the same encoder), so silence here would be an
+    # actively misleading figure. A mismatch is called out on its own line, in red.
+    mismatch = [lab for lab, key in [('eval pairs', 'eval_pairs_path'),
+                                     ('geodesic table', 'geo_table_path'), ('mesh', 'obj_path')]
+                if len({d.get(key) for d in runs}) > 1]
 
     y = -0.015
     fig.text(0.005, y, 'sources', ha='left', va='top', family='monospace',
              fontsize=7.0, color='0.25', weight='bold')
-    y -= 0.030
-    for ri, (d, lab, path) in enumerate(zip(runs, labels, args.runs)):
-        t = d.get('temperature')
-        k = d.get('k_vertices_per_pixel')
-        block = {'photo features ': d.get('features_path'),
-                 'vertex features': d.get('vertex_features_path'),
-                 'result file    ': path,
-                 'read setting   ': ('temperature = '
-                                     + ('(not recorded)' if t is None else f'{t:g}')
-                                     + '   k_vertices_per_pixel = '
-                                     + ('(not recorded)' if k is None else str(k)))}
-        for shared_lab, key in shared_keys:          # only when runs DISAGREE
-            if shared_lab not in shared:
-                block[f'{shared_lab:<15}'] = d.get(key)
-        fig.text(0.005, y, f'[{ri + 1}] {lab}', ha='left', va='top', family='monospace',
-                 fontsize=6.8, color=RUN_COLORS[ri % len(RUN_COLORS)], weight='bold')
-        y -= 0.022
-        fig.text(0.005, y, format_sources(block, indent='      '), ha='left', va='top',
-                 family='monospace', fontsize=6.5, color='0.25')
-        y -= 0.022 * len(block) + 0.010
-    if shared:
-        fig.text(0.005, y, 'shared by all runs\n' + format_sources(shared, indent='      '),
-                 ha='left', va='top', family='monospace', fontsize=6.5, color='0.25')
+    y -= 0.026
+    for ri, (lab, path) in enumerate(zip(labels, args.runs)):
+        fig.text(0.005, y, f'[{ri + 1}] {lab}  :  {path}', ha='left', va='top',
+                 family='monospace', fontsize=6.5,
+                 color=RUN_COLORS[ri % len(RUN_COLORS)])
+        y -= 0.024
+    if mismatch:
+        # A label-set difference means two OPPOSITE things depending on the encoder. If every run
+        # shares one pred_f, the figure is deliberately measuring the label sets against each
+        # other on a fixed encoder (v1 vs v2) -- valid, and worth naming. If the encoders ALSO
+        # differ, the run difference and the label-set difference are confounded and the figure
+        # cannot be read at all.
+        same_encoder = len({d.get('vertex_features_path') for d in runs}) == 1
+        msg, col = ((f'note: runs differ in {", ".join(mismatch)} but share one pred_f '
+                     f'-- this compares the LABEL SETS, not the runs', 'tab:blue')
+                    if same_encoder else
+                    (f'WARNING: runs differ in BOTH the encoder and the '
+                     f'{", ".join(mismatch)} -- confounded, not a valid comparison', 'tab:red'))
+        fig.text(0.005, y - 0.006, msg, ha='left', va='top', family='monospace',
+                 fontsize=7.0, color=col, weight='bold')
 
     os.makedirs(os.path.dirname(os.path.abspath(args.save_path)), exist_ok=True)
     fig.savefig(args.save_path, bbox_inches='tight', facecolor='white')

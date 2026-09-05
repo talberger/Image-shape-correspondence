@@ -64,12 +64,14 @@ def _auc(curve, eps_grid, eps_max):
 def format_sources(sources, indent=''):
     """Aligned `label : full path` lines for a figure footer.
 
-    Tal, 2026-09-01: every eval / comparison figure must carry the FULL path of every source it
-    read, so a PNG found on disk weeks later is self-describing -- which run's pred_f, which photo
-    features, which label set, at which read temperature. Paths are printed whole and never
-    elided: a truncated path cannot be pasted back into a command, which is the entire point of
-    putting it on the figure. Shared with analysis/compare_eval_runs.py, which formats one of
-    these blocks per run.
+    Tal, 2026-09-01: an eval figure must be self-describing -- a PNG found on disk weeks later
+    has to say what produced it. **Narrowed 2026-09-05, also Tal**: the original six-line block
+    (photo features, vertex features, eval pairs, geodesic table, mesh, read setting) was too
+    much of the figure, so only the RESULT FILE is printed. That loses nothing -- the .pth holds
+    every one of those paths, and `--replot_from <that file>` prints them back -- and the label
+    set is still named whenever it is not v1 (see build_sources). Paths are printed whole and
+    never elided: a truncated path cannot be pasted back into a command, which is the entire
+    point of putting it on the figure.
 
     `sources` is an ordered dict of label -> path (or None, printed as "(not recorded)" -- result
     files written before 2026-09-01 do not carry every key).
@@ -174,19 +176,19 @@ def draw_summary(plot_path, run_label, n, geo_diameter, eps_grid, curves, means,
 
 
 
-def build_sources(features_path, vertex_features_path, eval_pairs_path, geo_table_path,
-                  obj_path, temperature, k_vertices_per_pixel):
-    """The source block for one evaluated run. Ordered most- to least-run-specific: the two
-    feature files are what actually distinguish one run from another, the label set and tables
-    are shared across every run in the project."""
-    read_t = ('(not recorded)' if temperature is None else f'{temperature:g}')
-    k = '(not recorded)' if k_vertices_per_pixel is None else str(k_vertices_per_pixel)
-    return {'photo features ': features_path,
-            'vertex features': vertex_features_path,
-            'eval pairs     ': eval_pairs_path,
-            'geodesic table ': geo_table_path,
-            'mesh           ': obj_path,
-            'read setting   ': f'temperature = {read_t}   k_vertices_per_pixel = {k}'}
+def build_sources(result_path, eval_pairs_path=None):
+    """The source block for one evaluated run -- deliberately ONE line (Tal, 2026-09-05: the
+    six-line block was too much on every figure). The result .pth carries every path that
+    produced the numbers, so pointing at it loses nothing; `--replot_from <that file>` prints
+    them all back.
+
+    The label set is the ONE exception and is named only when it is not the v1 default: v1 and
+    v2 coexist since 2026-09-05, v2 scores ~2 AUC higher on the same encoder, and a figure that
+    does not say which set it used invites exactly that comparison."""
+    src = {'result file': result_path}
+    if eval_pairs_path and 'v2_edge_inset' in str(eval_pairs_path):
+        src['label set  '] = 'EVAL v2 (edge-inset) -- NOT comparable to v1 numbers'
+    return src
 
 
 def main(args):
@@ -204,10 +206,8 @@ def main(args):
                       'feature argmax': d['mean_error_argmax'],
                       'soft mean distance': d['mean_error_expected']},
                      args.eps_max, args.variant,
-                     sources=build_sources(
-                         d.get('features_path'), d.get('vertex_features_path'),
-                         d.get('eval_pairs_path'), d.get('geo_table_path'), d.get('obj_path'),
-                         d.get('temperature'), d.get('k_vertices_per_pixel')))
+                     sources=build_sources(args.replot_from,
+                                           d.get('eval_pairs_path')))
         return
 
     pairs = torch.load(args.eval_pairs_path)
@@ -324,10 +324,7 @@ def main(args):
         draw_summary(args.plot_path, args.run_label, n, geo_diameter, eps_grid,
                      curves, {'geometric snap': mean_a, 'feature argmax': mean_c,
                               'soft mean distance': mean_b}, args.eps_max, args.variant,
-                     sources=build_sources(
-                         args.features_path, args.vertex_features_path, args.eval_pairs_path,
-                         args.geo_table_path, args.obj_path, args.temperature,
-                         args.k_vertices_per_pixel))
+                     sources=build_sources(args.save_path, args.eval_pairs_path))
 
     if args.save_path:
         os.makedirs(os.path.dirname(os.path.abspath(args.save_path)), exist_ok=True)
