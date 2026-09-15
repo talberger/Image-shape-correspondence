@@ -51,7 +51,51 @@ BASELINE_PHASE2_DIR_DEFAULT = 'demo/guitar/runs/oldmesh_sweeps/stride14/bsb_sd_d
 BASELINE_PHASE2_COVERAGE_DEFAULT = '1230/4036 = 30.48%'
 
 
-def label_band(width, text, font_size=22, bg=(30, 30, 30), fg=(255, 255, 255)):
+# 2026-09-14 (Tal): the labels carry every flag now, so two rows can differ in one token inside a very
+# long line and the eye cannot find it. `shared_tokens` = the words a label has in common with the OTHER
+# rows of the same figure: those are drawn DIMMED, everything else in DIFF_FG (yellow). Pass shared=None
+# (the default) to draw the whole line in fg, exactly as before.
+DIFF_FG = (255, 214, 10)
+DIM_FG = (188, 188, 188)
+
+
+def _tok_key(tok):
+    """Trailing/leading punctuation is layout, not content: `stride 5,` and `stride 5` are the same
+    word, and without this the comma alone would light `5` up as a difference."""
+    return tok.strip(',.;:()[]').lower()
+
+
+def is_reference_label(label):
+    """A row that is a fixed REFERENCE, not one of the arms being compared: ZS or the baseline.
+
+    2026-09-14 (Tal): the highlighting is meant to show what differs BETWEEN THE ARMS, so these rows
+    are left out of the comparison and drawn plain -- their wording shares nothing with the arms and
+    would otherwise both empty the shared set and light their own line up.
+    """
+    l = (label or '').strip().lower()
+    return l.startswith('zs') or l.startswith('baseline') or 'phase-1 only' in l
+
+
+def shared_tokens(labels):
+    """Tokens common to MOST labels of a figure -- i.e. the part that is NOT the difference.
+
+    Not the intersection of all of them: rows still differ in how many words they spend on the same
+    thing, so a token counts as shared when at least half the rows carry it; with two rows that is
+    still both of them. Reference rows (ZS / baseline) are excluded entirely.
+    """
+    labels = [l for l in labels if l and not is_reference_label(l)]
+    sets = [{_tok_key(t) for t in l.split()} for l in labels if l]
+    if not sets:
+        return set()
+    need = max(2, (len(sets) + 1) // 2)
+    counts = {}
+    for s in sets:
+        for t in s:
+            counts[t] = counts.get(t, 0) + 1
+    return {t for t, c in counts.items() if c >= need}
+
+
+def label_band(width, text, font_size=22, bg=(30, 30, 30), fg=(255, 255, 255), shared=None):
     band = Image.new('RGB', (width, HEADER_H), bg)
     draw = ImageDraw.Draw(band)
     max_w = width - 16
@@ -66,7 +110,21 @@ def label_band(width, text, font_size=22, bg=(30, 30, 30), fg=(255, 255, 255)):
         font = ImageFont.truetype(FONT_PATH, 10)
         bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text(((width - tw) / 2, (HEADER_H - th) / 2 - bbox[1]), text, font=font, fill=fg)
+    y = (HEADER_H - th) / 2 - bbox[1]
+    if not shared:
+        draw.text(((width - tw) / 2, y), text, font=font, fill=fg)
+        return band
+    # token-by-token, so the differing words can carry their own colour. Widths are measured on the
+    # same font, and the space is drawn as advance width only -- the line lands where the one-shot
+    # draw.text above would have put it.
+    x = (width - tw) / 2
+    space = draw.textlength(' ', font=font)
+    for i, tok in enumerate(text.split(' ')):
+        if tok:
+            draw.text((x, y), tok, font=font, fill=(DIM_FG if _tok_key(tok) in shared else DIFF_FG))
+            x += draw.textlength(tok, font=font)
+        if i != len(text.split(' ')) - 1:
+            x += space
     return band
 
 
@@ -120,8 +178,12 @@ def stack(top_path, top_label, bottom_path, bottom_label, out_path, title):
     top, bot = pad(top), pad(bot)
 
     title_band = label_band(width, title, font_size=26, bg=(10, 10, 60)).resize((width, TITLE_H))
-    top_header = label_band(width, top_label, bg=(120, 30, 30))
-    bot_header = label_band(width, bottom_label, bg=(20, 90, 20))
+    # 2026-09-14 (Tal): dim the tokens both labels share, highlight the ones that differ
+    common = shared_tokens([top_label, bottom_label])
+    top_header = label_band(width, top_label, bg=(120, 30, 30),
+                            shared=None if is_reference_label(top_label) else common)
+    bot_header = label_band(width, bottom_label, bg=(20, 90, 20),
+                            shared=None if is_reference_label(bottom_label) else common)
 
     top_source = source_band(width, top_path)
     bot_source = source_band(width, bottom_path)

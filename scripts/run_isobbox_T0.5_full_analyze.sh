@@ -16,7 +16,7 @@ source /workspace/activate_bsb.sh
 # run first).
 
 RUN=experiments/guitar/encoder_isobbox_dino_sd_stride14_nosdsquare_relational_geodesic_mu3dscale1_T0.5_seed0_phase2
-OUT=demo/guitar/runs/isobbox/bsb_isobbox_sd_dino_stride14_nosdsquare_T0.5_seed0_phase2/analyze
+OUT=demo/guitar/runs/isobbox/bsb_isobbox_sdsquash_T0.5_seed0_phase2/analyze
 MASK=demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth
 PIXFEAT=demo/guitar/features_analyze/dino_sd_stride14_nosdsquare/guitar_01_pix_stride14_nosdsquare.pth
 POSCOLOR=demo/guitar/segment_masks_pixel270_370/pixel_coloring/guitar_01_click_270_370_sam_mask_2_position_color.png
@@ -84,7 +84,7 @@ python analysis/render_colored_mesh.py --obj_path "$OBJ" \
   --ply_path "$OUT/color_mesh_from_soft_mapping/${MASKBASE}_hard_snap_spheres_pix_${PIXTAG}.ply" \
   --save_dir "$OUT/color_mesh_from_soft_mapping/render" \
   --azim_deg 90 \
-  --source_image_path "demo/guitar/runs/isobbox/bsb_isobbox_sd_dino_stride14_nosdsquare_T0.5_seed0_phase2/step300/color_mesh_from_knn_k10/${MASKBASE}_mesh_color_position_k10_pix_${PIXTAG}_clicked_pixels.png"
+  --source_image_path "demo/guitar/runs/isobbox/bsb_isobbox_sdsquash_T0.5_seed0_phase2/step300/color_mesh_from_knn_k10/${MASKBASE}_mesh_color_position_k10_pix_${PIXTAG}_clicked_pixels.png"
 
 echo "=== feature-analyze: PCA (shared basis, image+mesh) ==="
 mkdir -p "$OUT/features_analyze/pca" "$OUT/features_analyze/sim_heatmap"
@@ -104,6 +104,6 @@ python analysis/feature_similarity_heatmap.py --obj_path "$OBJ" \
 echo "=== analysis_summary (10-panel one-glance grid) ==="
 python analysis/build_analysis_summary.py \
   --analyze_dir "$OUT" --checker_stem "$CHK_STEM" \
-  --output_path "demo/guitar/runs/isobbox/bsb_isobbox_sd_dino_stride14_nosdsquare_T0.5_seed0_phase2/analysis_summary.png"
+  --output_path "demo/guitar/runs/isobbox/bsb_isobbox_sdsquash_T0.5_seed0_phase2/analysis_summary.png"
 
 echo "ALL DONE"

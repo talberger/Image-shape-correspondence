@@ -57,15 +57,19 @@ import torch.nn.functional as F
 
 from modules.cycle_consistency_loss import cycle_consistency_loss
 from modules.cycle_consistency_loss_soft import cycle_consistency_loss_soft
+from modules.cycle_consistency_loss_v2 import cycle_consistency_loss_v2, cycle_consistency_loss_v2_allpix
 from modules.vertex_balance_loss import vertex_balance_loss
+from modules.anchor_loss import anchor_loss
+from modules.dist_loss import dist_loss
 from modules.mapping_loss import (feature_drift, sample_center_pixels,
                                   sample_grid_center_pixels, soft_map_to_vertices)
 from modules.feature_rkd_loss import (feature_rkd_angle_loss, feature_rkd_distance_loss,
                                       feature_rkd_pairwise_angle_loss, hard_feature,
                                       measure_feature_mu_references, soft_feature)
 from modules.relational_loss import (build_segment_index, relational_loss, relational_loss_geodesic,
-                                     sample_in_segment_neighbors, sample_out_segment_neighbors)
-from modules.utils import device, loadmesh
+                                     sample_in_segment_neighbors, sample_out_segment_neighbors,
+                                     spatial_angle_loss)
+from modules.utils import device, load_state_dict, loadmesh
 from phase2.train_mapping_loss import (assert_resume_is_sane, get_fourier_basis, hash_input,
                                        load_phase1_encoder, set_fourier_basis)
 
@@ -383,6 +387,19 @@ def train(args):
     phase1_features = assert_resume_is_sane(
         encoder, vertices, os.path.join(args.init_encoder_dir, 'pred_f.pth'))
 
+    if args.anchor_balance_from:
+        # --anchor_balance_from (2026-09-10): the soft anchor's gradient is EXACTLY zero at
+        # phase-1 (p == q), so its weight cannot be calibrated there. Move the encoder to a
+        # drifted phase-2 checkpoint AFTER the resume gate (which must still see phase-1), and
+        # keep phase1_features as the anchor's teacher.
+        ckpt = torch.load(args.anchor_balance_from, map_location=device)
+        load_state_dict(encoder, ckpt['encoder_state_dict'])
+        set_fourier_basis(encoder, ckpt.get('fourier_basis'))
+        with torch.no_grad():
+            print('  [anchor_balance] encoder moved to %s (step %s), drift vs phase-1 %.4f'
+                  % (args.anchor_balance_from, ckpt.get('step'),
+                     feature_drift(encoder(vertices), phase1_features)))
+
     # Everything here stays on CPU: these coordinates index the 3.6 GB pixel
     # feature file below, and torch rejects a CUDA index against a CPU source.
     coarse_mask = torch.load(args.object_mask_path, map_location='cpu').numpy()
@@ -469,6 +486,16 @@ def train(args):
         geo_table_3d = geo_table_3d.to(device)
         print('  geodesic tables loaded: 3D %s (diagonal=%.5f), 2D %s (diagonal=%.5f)'
               % (tuple(geo_table_3d.shape), geo_diag_3d, tuple(geo_table_2d.shape), geo_diag_2d))
+        if args.geo_diag_2d is not None:
+            # The stored 2D diagonal is a max over the SAMPLED CENTERS only (the table is
+            # [num_centers, num_mask_pixels]), so it can only underestimate the true all-pairs
+            # diameter. The 3D side has no such issue -- its table is all V x V pairs. Measured
+            # 2026-09-08 with analysis/measure_2d_geodesic_diameter.py: true 1175.75 px vs the
+            # stored 1171.65, a 0.35% underestimate.
+            print('  geo_diag_2d OVERRIDE: %.5f -> %.5f (%+.2f%%)'
+                  % (geo_diag_2d, args.geo_diag_2d,
+                     100 * (args.geo_diag_2d - geo_diag_2d) / geo_diag_2d))
+            geo_diag_2d = args.geo_diag_2d
 
         # seg_idx must never be able to hand out one of the disconnected speck pixels as a
         # neighbour -- caught by a real smoke-test failure, not anticipated: the specks turned
@@ -522,7 +549,11 @@ def train(args):
         print('  cycle-consistency loss: ON (--cyc_weight %g, %s variant), round trip '
               'restricted to the %d fixed center pixels for both legs, geodesic-weighted, '
               'normalized by 2D geodesic diameter %.2fpx'
-              % (args.cyc_weight, 'SOFT/no-snap' if args.cyc_soft else 'hard-snap',
+              % (args.cyc_weight,
+                 ('V2 (all vertices, T=%g both legs, return to %s)'
+                  % (args.cyc_temperature, 'ALL mask pixels' if args.cyc_return_all_pixels else 'the centers'))
+                 if args.cyc_v2
+                 else ('SOFT/no-snap' if args.cyc_soft else 'hard-snap'),
                  num_centers, cyc_geo_diag_2d))
     else:
         center_geo_dist = None
@@ -551,6 +582,42 @@ def train(args):
     # in-memory every step -- see index_pixel_features's docstring for why
     # this can't reuse load_pixel_features's per-call disk read here.
     all_pixel_features = torch.load(args.pix_dino_features_path, map_location='cpu')
+
+    # --cyc_return_all_pixels (2026-09-10): the cycle's return leg over ALL mask pixels (SHIC as
+    # written). Pixel features are gathered in 2D-table COLUMN order, so column j of the table and row j
+    # of cyc_all_pixel_features are the same pixel. Both live on the GPU (~2 GB + ~1.7 GB).
+    cyc_all_pixel_features = cyc_center_to_all = None
+    if args.cyc_weight > 0.0 and args.cyc_v2 and args.cyc_return_all_pixels:
+        on_mask_rc = (cyc_pixel_to_node >= 0).nonzero()
+        coords_by_node = torch.empty((on_mask_rc.shape[0], 2), dtype=torch.long)
+        coords_by_node[cyc_pixel_to_node[on_mask_rc[:, 0], on_mask_rc[:, 1]]] = on_mask_rc
+        cyc_all_pixel_features = F.normalize(
+            all_pixel_features[coords_by_node[:, 0], coords_by_node[:, 1]].float(), dim=-1).to(device)
+        cyc_center_to_all = (cyc_geo_table_2d.float() / max(cyc_geo_diag_2d, 1e-8)).to(device)
+        if cyc_center_to_all.shape[1] != cyc_all_pixel_features.shape[0]:
+            raise ValueError('2D table has %d columns but %d mask pixels were gathered'
+                             % (cyc_center_to_all.shape[1], cyc_all_pixel_features.shape[0]))
+        # --cyc_return_stride (2026-09-13): return leg lands only on mask pixels on a regular
+        # s-pixel grid (row % s == 0 and col % s == 0). Same table, column subset -- distances stay
+        # exact. Cuts the [V x M] return softmax ~s^2 x, the cost that made all-pixel runs 15 min.
+        if args.cyc_return_stride > 1:
+            keep = ((coords_by_node[:, 0] % args.cyc_return_stride == 0)
+                    & (coords_by_node[:, 1] % args.cyc_return_stride == 0)).nonzero().squeeze(1)
+            cyc_all_pixel_features = cyc_all_pixel_features[keep.to(device)]
+            cyc_center_to_all = cyc_center_to_all[:, keep.to(device)]
+        print('  cycle v2 return leg: %d mask pixels (%s), table [%d x %d] on GPU'
+              % (cyc_all_pixel_features.shape[0],
+                 'ALL, SHIC as written' if args.cyc_return_stride == 1 else
+                 'grid stride %d' % args.cyc_return_stride,
+                 cyc_center_to_all.shape[0], cyc_center_to_all.shape[1]))
+
+    def _cyc_v2(center_pf, vf):
+        if args.cyc_return_all_pixels:
+            # chunk size scaled so memory per chunk stays what it was at the full 212k pixels
+            return cycle_consistency_loss_v2_allpix(
+                center_pf, vf, cyc_all_pixel_features, cyc_center_to_all, args.cyc_temperature,
+                chunk_size=max(256, 256 * 212549 // cyc_all_pixel_features.shape[0]))
+        return cycle_consistency_loss_v2(center_pf, vf, center_geo_dist, args.cyc_temperature)
 
     if sum([args.bbox_norm, args.live_mu_3d, args.geodesic]) > 1:
         raise ValueError('--bbox_norm, --live_mu_3d, and --geodesic are mutually exclusive '
@@ -641,7 +708,59 @@ def train(args):
                   'to geometry (2026-09-04: this diverged when tried) ***')
 
     print('  distance_weight: %s' % (args.distance_weight or 'none (every pair weighted equally)'))
-    print('  mu_3d_scale: %g%s' % (args.mu_3d_scale, ' (no-op)' if args.mu_3d_scale == 1.0 else ''))
+    if args.anchor_weight > 0.0 or args.anchor_balance_from:
+        print('  ZS anchor: weight=%g T=%g target=%s (CE over all %d vertices vs frozen phase-1, '
+              'see modules/anchor_loss.py)'
+              % (args.anchor_weight, args.anchor_temperature,
+                 'HARD argmax (SHIC L_pseudo)' if args.anchor_hard else 'SOFT q_ZS',
+                 vertices.shape[0]))
+    # SHIC L_dist (2026-09-12). Needs the 3D geodesic table, which only the --geodesic branch
+    # loads -- fail loudly rather than silently skipping the term.
+    dist_target_idx = None
+    if args.dist_weight > 0.0 or args.dist_balance:
+        if not args.geodesic:
+            raise ValueError('--dist_weight/--dist_balance need the 3D geodesic table, which is only '
+                             'loaded under --geodesic. Add --geodesic (the current recipe uses it).')
+        print('  SHIC L_dist: weight=%g T_dist=%g (E_p[geodesic distance to %s] / %.5f, '
+              'over all %d vertices -- see modules/dist_loss.py)'
+              % (args.dist_weight, args.dist_temperature,
+                 'the ZS argmax' if args.dist_soft_target_temperature is None else
+                 'y ~ SOFT q_ZS at T=%g' % args.dist_soft_target_temperature,
+                 geo_diag_3d, vertices.shape[0]))
+    # MU-LEARNED (2026-09-14, Tal) -- mu_3d_scale is the proportion/zoom coefficient between the two
+    # normalized distance spaces. It used to be a hand-swept constant; it can now be FITTED.
+    #   --mu_mode fixed    the constant in --mu_3d_scale (default, bit-identical to every old run)
+    #   --mu_mode optimal  closed-form least-squares refit EVERY step (no parameter, no lr)
+    #   --mu_mode learned  an nn.Parameter trained by Adam alongside the encoder
+    #   --mu_scope global|segment   one scale for everything, or one per fine segment
+    # A pair's group is its CENTRE's segment (the simple choice; an out-of-segment pair therefore
+    # belongs to the centre's segment, not the neighbour's).
+    mu_log_scale = None
+    mu_groups = None
+    mu_n_groups = None
+    mu_seg_map = None
+    if args.mu_mode != 'fixed':
+        if not args.geodesic:
+            raise SystemExit('--mu_mode %s is only implemented for the geodesic loss' % args.mu_mode)
+        if args.mu_scope == 'segment':
+            seg_vals = torch.unique(segment_ids)
+            mu_n_groups = int(max(seg_vals.max().item(), int(fine_segments.max())) ) + 1
+            mu_groups = segment_ids.to(device).long()          # [n], broadcast over the k pairs
+            # the fine-segment map, so each NEIGHBOUR pixel's segment is available per step
+            # (fixes 1 and 2: fit from in-segment pairs, geometric mean across segments)
+            mu_seg_map = torch.as_tensor(fine_segments, device=device).long()
+        else:
+            mu_n_groups = 1
+            mu_groups = None
+        if args.mu_mode == 'learned':
+            mu_log_scale = torch.zeros(mu_n_groups, device=device, requires_grad=True)
+        print('  mu_3d_scale: %s, scope %s%s -- the zoom between norm_d_2D and norm_d_3D is %s'
+              % (args.mu_mode, args.mu_scope,
+                 '' if mu_n_groups == 1 else ' (%d segments)' % mu_n_groups,
+                 'refit in closed form every step' if args.mu_mode == 'optimal'
+                 else 'an Adam-trained parameter (init 1.0)'))
+    else:
+        print('  mu_3d_scale: %g%s' % (args.mu_3d_scale, ' (no-op)' if args.mu_3d_scale == 1.0 else ''))
     if args.balance_weight > 0.0:
         print('  vertex-balance loss: ON (--balance_weight %g), Switch-Transformer-style '
               'load-balancing auxiliary loss over the %d fixed centers\' top-%d vertex '
@@ -649,6 +768,10 @@ def train(args):
               % (args.balance_weight, num_centers, args.k_vertices_per_pixel))
 
     optimizer = torch.optim.Adam(encoder.parameters(), args.lr, eps=args.adam_eps)
+    if mu_log_scale is not None:
+        # its own param group: the scale is one number (or 17), not a feature map, and it has to be
+        # free to move much faster than the encoder or it will not arrive inside 300 steps
+        optimizer.add_param_group({'params': [mu_log_scale], 'lr': args.mu_lr})
     os.makedirs(args.out_dir, exist_ok=True)
 
     losses = []
@@ -701,7 +824,9 @@ def train(args):
             # candidates/weights, not the already-collapsed (generally off-surface) point --
             # see modules/relational_loss.py's geodesic-variant docstring for why the collapsed
             # point can't be used here the way it is for Euclidean distance.
-            _, topk_idx, weights = soft_map_to_vertices(
+            # soft_points (the collapsed Σ w·v point) is unused by the geodesic distance, but
+            # --spatial_angle_weight needs it: Euclidean angles are measured between these points.
+            soft_points, topk_idx, weights = soft_map_to_vertices(
                 pixel_features, vertex_features, vertices, args.k_vertices_per_pixel,
                 return_topk=True, temperature=args.temperature)
 
@@ -712,11 +837,43 @@ def train(args):
             neighbor_weights = weights[num_centers:].view(
                 num_centers, num_neighbors, args.k_vertices_per_pixel)
 
-            loss, mu_2D, mu_3D_live = relational_loss_geodesic(
+            _rl = relational_loss_geodesic(
                 center_topk_idx, center_weights, neighbor_topk_idx, neighbor_weights,
                 neighbor_coords, geo_table_3d, geo_table_2d_center_rows, pixel_to_node,
                 mu_3D_reference=mu_3D_reference, mu_2D_reference=mu_2D_reference,
-                mu_3d_scale=args.mu_3d_scale, huber_delta=args.huber_delta)
+                mu_3d_scale=(args.mu_3d_scale if args.mu_mode == 'fixed' else
+                             'optimal' if args.mu_mode == 'optimal' else mu_log_scale.exp()),
+                mu_groups=mu_groups, mu_n_groups=mu_n_groups,
+                mu_neighbor_groups=(None if mu_seg_map is None else
+                                    mu_seg_map[neighbor_coords[..., 0].to(device),
+                                               neighbor_coords[..., 1].to(device)]),
+                mu_fit_space=args.mu_fit_space,
+                return_mu_scale=(args.mu_mode != 'fixed'),
+                huber_delta=args.huber_delta,
+                return_residuals=(args.dump_residuals and step == 1))
+            if args.mu_mode != 'fixed':
+                loss, mu_2D, mu_3D_live, mu_scale_step = _rl
+                _rl = (loss, mu_2D, mu_3D_live)
+            if args.dump_residuals and step == 1:
+                loss, mu_2D, mu_3D_live, residuals = _rl
+                # --dump_residuals (2026-09-09): --huber_delta is a transition point on the
+                # per-pair residual norm_d_3D - norm_d_2D, so picking it without knowing that
+                # quantity's scale is guessing. Both distances are divided by a geodesic
+                # diameter, so they live in [0, 1]; if the residuals sit orders of magnitude
+                # below delta, Huber never leaves its quadratic branch and the loss is plain MSE.
+                a = residuals.abs().flatten().float().cpu()
+                qs = [50, 75, 90, 95, 99, 99.9]
+                vals = torch.quantile(a, torch.tensor([q / 100.0 for q in qs]))
+                print('--- residual |norm_d_3D - norm_d_2D| at step 1, n=%d pairs' % a.numel())
+                print('    mean %.5f  rms %.5f  max %.5f'
+                      % (a.mean().item(), a.pow(2).mean().sqrt().item(), a.max().item()))
+                for q, v in zip(qs, vals.tolist()):
+                    print('    p%-5s %.5f' % (q, v))
+                for d in (0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0):
+                    print('    delta=%-5g clips %6.2f%% of pairs' % (d, 100.0 * (a > d).float().mean().item()))
+                print('--- (--dump_residuals: diagnostic only, stopping before backward)')
+                return
+            loss, mu_2D, mu_3D_live = _rl
         else:
             # return_topk=True even here (unused for relational_loss itself, which only needs
             # `points`): --balance_weight needs the same per-pixel top-K weights the geodesic
@@ -739,6 +896,104 @@ def train(args):
                 huber_delta=args.huber_delta)
 
         loss = args.relational_weight * loss
+
+        # --- ANGLE-SPATIAL (added 2026-09-15) ------------------------------------------------
+        # RKD's angle term in the SPATIAL domain, EUCLIDEAN angles (image-plane rays vs chords
+        # between the soft-mapped 3D points) -- see spatial_angle_loss(). Weight 0.0 skips the
+        # block, so every earlier run is bit-identical.
+        sang_raw = sang_gap = sang_valid = float('nan')
+        if args.spatial_angle_weight > 0.0 or args.spatial_angle_balance:
+            if not args.geodesic:
+                raise SystemExit('--spatial_angle_weight is only wired into the --geodesic branch')
+            sang_loss, sang_gap, sang_valid = spatial_angle_loss(
+                soft_points[:num_centers],
+                soft_points[num_centers:].view(num_centers, num_neighbors, 3),
+                coords, neighbor_coords, min_ray_px=args.spatial_angle_min_ray_px,
+                huber_delta=args.huber_delta)
+            sang_raw = sang_loss.item()
+            if args.spatial_angle_balance:
+                # Same rule as every other term: under Adam only the RATIO of gradient norms matters.
+                params = [p for p in encoder.parameters() if p.requires_grad]
+                def _gn(t):
+                    gs = torch.autograd.grad(t, params, retain_graph=True, allow_unused=True)
+                    return torch.sqrt(sum((g.float() ** 2).sum() for g in gs if g is not None)).item()
+                g_rel, g_ang = _gn(loss), _gn(sang_loss)
+                print('--- spatial angle balance (Euclidean angles, min ray %g px)'
+                      % args.spatial_angle_min_ray_px)
+                print('    relational   : loss %.6e  grad norm %.4e' % (loss.item(), g_rel))
+                print('    spatial angle: loss %.6e  grad norm %.4e  |cos gap| %.4f  valid triplets %.3f'
+                      % (sang_raw, g_ang, sang_gap, sang_valid))
+                for r in (1.0, 3.0, 10.0):
+                    print('    spatial_angle_weight at 1/%g of relational: %.4e'
+                          % (r, g_rel / (r * max(g_ang, 1e-30))))
+                print('--- (--spatial_angle_balance: diagnostic only, stopping before backward)')
+                return
+            loss = loss + args.spatial_angle_weight * sang_loss
+
+        # --- ZS anchor (added 2026-09-10)---------------------------------------------------
+        # The only ABSOLUTE term in phase-2: CE of the student's distribution over all vertices
+        # against the frozen phase-1 one, on the same center pixels. Weight 0.0 skips the block,
+        # so every pre-existing run is bit-identical (no RNG is consumed here either way).
+        anc_kl = anc_agree = float('nan')
+        if args.anchor_weight > 0.0 or args.anchor_balance_from:
+            anc_loss, anc_kl, anc_agree = anchor_loss(
+                pixel_features[:num_centers], vertex_features, phase1_features,
+                args.anchor_temperature, hard=args.anchor_hard)
+            if args.anchor_balance_from:
+                # Under Adam a constant factor on the WHOLE loss cancels, but the RATIO between
+                # two terms does not -- so lambda is chosen where the two gradient norms match.
+                params = [p for p in encoder.parameters() if p.requires_grad]
+                def _gnorm(t):
+                    gs = torch.autograd.grad(t, params, retain_graph=True, allow_unused=True)
+                    return torch.sqrt(sum((g.float() ** 2).sum() for g in gs if g is not None)).item()
+                g_rel, g_anc = _gnorm(loss), _gnorm(anc_loss)
+                print('--- anchor balance (%s target, T=%g)' % (
+                    'hard' if args.anchor_hard else 'soft', args.anchor_temperature))
+                print('    relational: loss %.6e  grad norm %.4e' % (loss.item(), g_rel))
+                print('    anchor    : loss %.6e  grad norm %.4e  KL %.4e  top1 agree %.3f'
+                      % (anc_loss.item(), g_anc, anc_kl, anc_agree))
+                print('    lambda at equal grad norms: %.4e' % (g_rel / max(g_anc, 1e-30)))
+                if args.cyc_weight > 0.0 and args.cyc_v2:
+                    # Cycle rides next to the anchor at SHIC's ratio (beta/alpha = 0.002/0.1 = 1/50):
+                    # pick cyc_weight so its gradient norm is 1/50 of the WEIGHTED anchor's.
+                    c_loss, _, c_refs = _cyc_v2(pixel_features[:num_centers], vertex_features)
+                    g_cyc = _gnorm(c_loss)
+                    print('    cycle v2  : loss %.6e  grad norm %.4e  (T=%g, argmax refs %d)'
+                          % (c_loss.item(), g_cyc, args.cyc_temperature, c_refs))
+                    print('    cyc_weight at 1/50 of anchor (lambda=%g): %.4e'
+                          % (args.anchor_weight, args.anchor_weight * g_anc / (50.0 * max(g_cyc, 1e-30))))
+                if args.dist_balance:
+                    # L_dist rides next to the anchor at the same kind of ratio as the cycle.
+                    d_loss, d_tail, d_agree, _ = dist_loss(
+                        pixel_features[:num_centers], vertex_features, phase1_features,
+                        geo_table_3d, geo_diag_3d, args.dist_temperature,
+                        soft_target_temperature=args.dist_soft_target_temperature)
+                    g_dist = _gnorm(d_loss)
+                    print('    L_dist    : loss %.6e  grad norm %.4e  (T_dist=%g, tail>0.2D %.3f, '
+                          'zs_top1 %.3f)'
+                          % (d_loss.item(), g_dist, args.dist_temperature, d_tail, d_agree))
+                    for r in (10.0, 50.0):
+                        print('    dist_weight at 1/%g of anchor (lambda=%g): %.4e'
+                              % (r, args.anchor_weight,
+                                 args.anchor_weight * g_anc / (r * max(g_dist, 1e-30))))
+                print('--- (--anchor_balance_from: diagnostic only, stopping before backward)')
+                return
+            loss = loss + args.anchor_weight * anc_loss
+
+        # --- SHIC L_dist (added 2026-09-12) --------------------------------------------------
+        # The METRIC companion to the anchor: E_p[ geodesic distance to the ZS argmax ]. The
+        # anchor's CE is blind to WHERE the mass it dislikes sits; this term is blind to how
+        # peaked p is and sees only that. See modules/dist_loss.py for the full argument.
+        # x~ is fixed across steps whenever the centers are (i.e. unless --resample_centers),
+        # so it is computed once and cached.
+        dist_tail = dist_agree = float('nan')
+        if args.dist_weight > 0.0:
+            dst_loss, dist_tail, dist_agree, dist_target_idx = dist_loss(
+                pixel_features[:num_centers], vertex_features, phase1_features,
+                geo_table_3d, geo_diag_3d, args.dist_temperature,
+                target_idx=None if args.resample_centers else dist_target_idx,
+                soft_target_temperature=args.dist_soft_target_temperature)
+            loss = loss + args.dist_weight * dst_loss
 
         # --- feature-space RKD (added 2026-08-28) -------------------------------------------
         # Two additive terms on the feature dimension, on top of the geometric relational loss
@@ -823,10 +1078,14 @@ def train(args):
             loss = loss + args.balance_weight * bal_loss
 
         if args.cyc_weight > 0.0:
-            cyc_fn = cycle_consistency_loss_soft if args.cyc_soft else cycle_consistency_loss
-            cyc_loss, cyc_norm, cyc_num_verts = cyc_fn(
-                pixel_features[:num_centers], vertex_features, vertices,
-                args.k_vertices_per_pixel, center_geo_dist)
+            if args.cyc_v2:
+                # 2026-09-10: SHIC L_cyc + CSE temperature, all vertices -- modules/cycle_consistency_loss_v2.py
+                cyc_loss, cyc_norm, cyc_num_verts = _cyc_v2(pixel_features[:num_centers], vertex_features)
+            else:
+                cyc_fn = cycle_consistency_loss_soft if args.cyc_soft else cycle_consistency_loss
+                cyc_loss, cyc_norm, cyc_num_verts = cyc_fn(
+                    pixel_features[:num_centers], vertex_features, vertices,
+                    args.k_vertices_per_pixel, center_geo_dist)
             loss = loss + args.cyc_weight * cyc_loss
 
         loss.backward()
@@ -834,7 +1093,8 @@ def train(args):
         if step == 1:
             grad_norm = torch.cat([p.grad.reshape(-1) for p in encoder.parameters()
                                    if p.grad is not None]).norm().item()
-            print('step    1  total grad norm %.4e' % grad_norm)
+            print('step    1  total grad norm %.4e  peak GPU mem %.2f GB'
+                  % (grad_norm, torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0))
 
         optimizer.step()
         losses.append(loss.item())
@@ -857,10 +1117,27 @@ def train(args):
                         'pair_cos_gap=%.4f mu_img_live=%.5f mu_msh_live=%.5f)'
                         % (feat_dist_raw, feat_angle_raw, feat_pair_angle_raw, cos_gap,
                            pair_cos_gap, mu_img_live, mu_msh_live))
-            print('step %4d/%d  loss %.6f (mu_2D=%.3f mu_3D_live=%.5f, ref_2D=%s ref_3D=%s)%s%s%s  '
+            anc_str = ('' if args.anchor_weight == 0.0 else
+                       '  anchor_KL=%.4f top1_agree=%.3f' % (anc_kl, anc_agree))
+            dist_str = ('' if args.dist_weight == 0.0 else
+                        '  L_dist=%.4f tail>0.2D=%.3f zs_top1=%.3f'
+                        % (dst_loss.item(), dist_tail, dist_agree))
+            # MU-LEARNED: report the fitted zoom. One number when global; min/median/max plus the
+            # spread when per-segment, because the interesting question there is whether the
+            # segments disagree (an isotropic scalar cannot fix it if they do).
+            mu_str = ''
+            if args.mu_mode != 'fixed':
+                s = mu_scale_step.detach().flatten().float()
+                mu_str = ('  mu_s=%.4f' % s.item() if s.numel() == 1 else
+                          '  mu_s[min/med/max]=%.3f/%.3f/%.3f' %
+                          (s.min().item(), s.median().item(), s.max().item()))
+            sang_str = ('' if args.spatial_angle_weight == 0.0 else
+                        '  sangle=%.5f (raw) cos_gap=%.4f valid=%.3f' % (sang_raw, sang_gap, sang_valid))
+            print('step %4d/%d  loss %.6f (mu_2D=%.3f mu_3D_live=%.5f, ref_2D=%s ref_3D=%s)%s%s%s%s%s%s%s  '
                   'drift(cos vs phase 1) %.4f'
                   % (step, args.num_iters, loss.item(), mu_2D, mu_3D_live,
-                     ref_2D_str, ref_3D_str, cyc_str, bal_str, feat_str, drift))
+                     ref_2D_str, ref_3D_str, cyc_str, bal_str, feat_str, anc_str, dist_str, mu_str,
+                     sang_str, drift))
 
             torch.save({'encoder_state_dict': encoder.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
@@ -1035,7 +1312,58 @@ if __name__ == '__main__':
                              'draws that land back in the center\'s own segment')
     parser.add_argument('--huber_delta', type=float, default=1.0,
                         help='Huber transition point on the normalized-distance residual; '
-                             "1.0 is RKD's own fixed choice")
+                             "1.0 is RKD's own fixed choice. Run --dump_residuals first: the "
+                             'residuals here are ~0.02, so the default never leaves the '
+                             'quadratic branch and the loss is effectively plain MSE.')
+    parser.add_argument('--dump_residuals', action='store_true',
+                        help='Diagnostic: at step 1, print the distribution of the per-pair '
+                             'residual --huber_delta is a threshold on, then exit without '
+                             'training. Geodesic branch only. Writes nothing.')
+    parser.add_argument('--anchor_weight', type=float, default=0.0,
+                        help='2026-09-10: weight of the ZS anchor, CE of the student distribution '
+                             'over ALL vertices against the frozen phase-1 one (modules/anchor_loss.py, '
+                             'structure from DensePose-CSE soft_embed.py). 0 = off, bit-identical.')
+    parser.add_argument('--anchor_temperature', type=float, default=0.01,
+                        help='T for both q_ZS and p. At T=1 q over 3886 vertices is ~uniform '
+                             '(measured 2026-09-10); 0.01 = ~75 effective vertices.')
+    parser.add_argument('--anchor_hard', action='store_true',
+                        help='one-hot argmax target instead of soft q_ZS -- SHIC\'s L_pseudo, the control arm')
+    parser.add_argument('--anchor_balance_from', type=str, default=None,
+                        help='Diagnostic: load this phase-2 step checkpoint, print the gradient norms '
+                             'of the relational and anchor terms and the lambda that equalizes them, '
+                             'then exit. Needed because the soft anchor gradient is 0 at phase-1.')
+    parser.add_argument('--dist_weight', type=float, default=0.0,
+                        help='2026-09-12: weight of SHIC L_dist = sum_x p(x|u) d_geo(x, x~)/D, with a HARD '
+                             'x~ = argmax q_ZS (modules/dist_loss.py). The METRIC term the anchor is blind '
+                             'to: the anchor CE gives zero pull to a vertex q dislikes no matter how far '
+                             'away it is. 0 = off, bit-identical.')
+    parser.add_argument('--dist_temperature', type=float, default=1.0,
+                        help='T for p inside L_dist. SEPARATE from --anchor_temperature on purpose: at '
+                             'T=0.01 p is ~75 vertices and L_dist only re-ranks inside the anchor blob; at '
+                             'T=1 the mass spans all 3886, which is where the far leak lives.')
+    parser.add_argument('--dist_soft_target_temperature', type=float, default=None,
+                        help='2026-09-13: SOFT L_dist target. None (default) = hard x~ = argmax q_ZS, '
+                             'bit-identical. Otherwise d(x) = E_{y~q_ZS}[d_geo(x,y)]/D with q_ZS at this T; '
+                             'minimizer = geodesic median of q, which only departs from x~ at T >= ~0.05 '
+                             '(analysis/soft_dist_median_check.py).')
+    parser.add_argument('--dist_balance', action='store_true',
+                        help='Diagnostic, used with --anchor_balance_from: also print L_dist\'s gradient '
+                             'norm and the gamma that puts it at 1/10 and 1/50 of the WEIGHTED anchor '
+                             '(--anchor_weight), the same way cyc_weight is picked. Unlike the anchor, '
+                             'L_dist\'s gradient is nonzero at phase-1, but the anchor it is being sized '
+                             'against is not, so the same step checkpoint is used.')
+    parser.add_argument('--cyc_v2', action='store_true',
+                        help='2026-09-10: cycle loss v2 (modules/cycle_consistency_loss_v2.py) -- SHIC L_cyc '
+                             'over ALL vertices with a temperature on both legs (CSE). Needs --cyc_weight > 0.')
+    parser.add_argument('--cyc_temperature', type=float, default=0.05,
+                        help='T for both legs of --cyc_v2. 0.05 = CSE cycle_pix2shape default.')
+    parser.add_argument('--cyc_return_all_pixels', action='store_true',
+                        help='--cyc_v2 return leg over ALL mask pixels (SHIC L_cyc as written) instead of '
+                             'the 2048 centers. d(u,v) comes straight from the 2D table columns.')
+    parser.add_argument('--cyc_return_stride', type=int, default=1,
+                        help='2026-09-13, with --cyc_return_all_pixels: return leg only on mask pixels with '
+                             'row %% s == 0 and col %% s == 0 (s=5: 212k -> ~8.5k). Distances stay exact '
+                             '(column subset). 1 = all pixels, bit-identical.')
     parser.add_argument('--mu_3d_reference_samples', type=int, default=5,
                         help='independent random neighbour draws averaged together to '
                              'measure the FIXED mu_3D normalizer from the phase-1 encoder, '
@@ -1076,6 +1404,15 @@ if __name__ == '__main__':
                         default='./experiments/guitar/geodesic_tables/guitar_geo_table_3d.pth',
                         help='--geodesic only: vertex-to-vertex geodesic table from '
                              'analysis/build_geodesic_tables.py')
+    parser.add_argument('--geo_diag_2d', type=float, default=None,
+                        help='override the 2D geodesic diameter used to normalize d_2D, instead of '
+                             "taking the table's own stored `diagonal`. That stored value is a max "
+                             'over the sampled CENTER rows only, so it underestimates the true '
+                             'all-pairs diameter; the 3D side is a true all-pairs max, so the two '
+                             'sides are not computed the same way. Measure the true value with '
+                             'analysis/measure_2d_geodesic_diameter.py (1175.75 px for '
+                             'segment_masks_pixel270_370, vs 1171.65 stored -- 0.35% low). '
+                             'Added 2026-09-08 at Tal\'s request.')
     parser.add_argument('--geo_table_2d_path', type=str, default=None,
                         help='--geodesic and/or --cyc_weight>0: defaults to '
                              './experiments/guitar/geodesic_tables/<mask_basename>_geo_table_2d_seed<seed>.pth')
@@ -1086,6 +1423,46 @@ if __name__ == '__main__':
                              'get more say in the loss. \'near\': the opposite (weight '
                              '1/norm_d_2D, floored). Composes with any normalization mode '
                              'above -- orthogonal concern, applied after normalization.')
+    # MU-LEARNED (2026-09-14, Tal) -- see PROJECT_NOTES.md. `fixed` keeps every earlier run
+    # bit-identical; `optimal` and `learned` make the zoom a fitted quantity instead of a guess.
+    parser.add_argument('--mu_mode', type=str, default='fixed',
+                        choices=['fixed', 'optimal', 'learned'],
+                        help="how mu_3d_scale is set. 'fixed': the --mu_3d_scale constant "
+                             "(default, unchanged behaviour). 'optimal': refit in CLOSED FORM "
+                             "every step (s* = sum(b^2)/sum(a*b) over the sampled pairs, detached; "
+                             "no parameter and no lr to tune). 'learned': an nn.Parameter trained "
+                             'by Adam at --mu_lr, init 1.0. Geodesic loss only.')
+    parser.add_argument('--mu_scope', type=str, default='global', choices=['global', 'segment'],
+                        help='--mu_mode optimal/learned: one scale for the whole object, or one '
+                             'PER FINE SEGMENT. A pair belongs to its CENTRE pixel\'s segment. '
+                             'Per-segment is the anisotropy test: a single scalar can only fix a '
+                             'uniform zoom, and the 09-10 measurement says mu<1 compresses the '
+                             'NECK specifically, i.e. the distortion is regional.')
+    parser.add_argument('--mu_fit_space', type=str, default='abs', choices=['abs', 'log'],
+                        help="--mu_mode optimal: 'abs' (default) fits the scale on the ABSOLUTE "
+                             'residual, which is what the loss itself measures -- a pair contributes '
+                             'in proportion to its length squared, so long pairs dominate. '
+                             "'log' fits on the RELATIVE residual instead (minimise "
+                             '(log(d_3D/s) - log(d_2D))^2), where a 10%% error counts the same at '
+                             'any length. Left OFF by default 2026-09-14: Tal wants the long '
+                             'in-segment pairs to carry the scale, and unlike the in-segment / '
+                             'geometric-mean fixes this one is a modelling choice, not a bug.')
+    parser.add_argument('--mu_lr', type=float, default=1e-2,
+                        help='--mu_mode learned: lr for the scale parameter only (its own Adam '
+                             'param group). Much larger than the encoder lr on purpose -- it is '
+                             'one number and it has 300 steps to arrive.')
+    # ANGLE-SPATIAL (2026-09-15, Tal) -- see PROJECT_NOTES.md and spatial_angle_loss().
+    parser.add_argument('--spatial_angle_weight', type=float, default=0.0,
+                        help='weight of RKD\'s angle term in the SPATIAL domain: the angle at each '
+                             'centre between rays to two neighbours, image pixels vs soft-mapped 3D '
+                             'points. EUCLIDEAN angles on both sides. 0.0 (default) = off, bit-identical.')
+    parser.add_argument('--spatial_angle_min_ray_px', type=float, default=14.0,
+                        help='drop triplets with an image-side ray shorter than this (default 14 = one '
+                             'DINO patch; shorter rays give noise angles).')
+    parser.add_argument('--spatial_angle_balance', action='store_true',
+                        help='diagnostic: print the relational and spatial-angle gradient norms and the '
+                             'weight at equal / 1/3 / 1/10 of relational, then stop before backward. '
+                             'Pair with --anchor_balance_from <checkpoint> to measure on a drifted state.')
     parser.add_argument('--mu_3d_scale', type=float, default=1.0,
                         help='Divide norm_d_3D by this AFTER normalization (1.0, the default, '
                              'is a no-op -- byte-identical to not passing this flag). '
@@ -1204,6 +1581,14 @@ if __name__ == '__main__':
     parser.add_argument('--out_dir', type=str,
                         default='./experiments/guitar/encoder_dino_relational')
     args = parser.parse_args()
+
+    if args.mu_mode != 'fixed':
+        if args.mu_3d_scale != 1.0:
+            raise SystemExit('--mu_3d_scale is the FIXED constant; it cannot be combined with '
+                             '--mu_mode %s, which fits the scale instead' % args.mu_mode)
+        if args.dump_residuals:
+            raise SystemExit('--dump_residuals and --mu_mode %s both take over the loss return '
+                             'value; run the residual dump with --mu_mode fixed' % args.mu_mode)
 
     if args.init_encoder_checkpoint is None:
         args.init_encoder_checkpoint = os.path.join(args.init_encoder_dir,

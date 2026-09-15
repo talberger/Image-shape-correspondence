@@ -514,9 +514,134 @@ def geodesic_distance_2d_lookup(neighbor_coords, geo_table_2d_center_rows, pixel
     return geo_table_2d_center_rows.gather(1, node_idx)
 
 
+def optimal_mu_3d_scale(norm_d_3D, norm_d_2D, group_ids=None, n_groups=None, min_pairs=32,
+                        eps=1e-12, pair_mask=None, fit_space='abs'):
+    """Closed-form `mu_3d_scale` (MU-LEARNED direction, 2026-09-14 -- see PROJECT_NOTES.md).
+
+    The loss compares norm_d_3D / s against norm_d_2D, so for a fixed mapping the best s is a
+    one-dimensional least-squares fit, not something an optimizer has to discover:
+        minimise sum (b/s - a)^2 over s,  with a = norm_d_2D, b = norm_d_3D
+        substitute t = 1/s  ->  t* = sum(a*b) / sum(b*b)  ->  s* = sum(b*b) / sum(a*b)
+    It is solved exactly at EVERY step, so the features never spend gradient on the global zoom.
+    Returned DETACHED: s is a fitted constant for this step, not a parameter to backprop through.
+
+    group_ids (long, broadcastable to the pair shape) + n_groups fit ONE s PER GROUP -- the
+    per-segment variant. A group with fewer than `min_pairs` pairs falls back to the global fit
+    rather than to a noisy one of its own.
+
+    NOTE this fit is exact for the MSE branch of the Huber. With huber_delta=1.0 and both
+    distances divided by a geodesic diameter the residuals are ~1e-2 at most, so the loss is
+    plain MSE in practice (measured 2026-09-09, `--dump_residuals`) and the fit is the true
+    optimum. If delta is ever lowered into the residual range, this becomes an approximation.
+    """
+    a = norm_d_2D.detach().flatten()
+    b = norm_d_3D.detach().flatten()
+    if pair_mask is not None:
+        # FIX 1 (Tal, 2026-09-14): a segment's scale must be fitted from pairs that lie INSIDE it.
+        # 8 of every centre's 16 neighbours are drawn out-of-segment on purpose, so without this
+        # mask half of each segment's pairs are shared neck<->body pairs and every segment ends up
+        # measuring the same global structure -- which is exactly what the first per-segment run
+        # produced (all 17 scales inside 0.724-0.738).
+        m = pair_mask.detach().flatten().bool()
+        a, b = a[m], b[m]
+        if group_ids is not None:
+            group_ids = group_ids.detach().flatten()[m]
+
+    def _fit(aa, bb):
+        if fit_space == 'log':   # FIX 3, opt-in: relative error, so a long pair and a short pair
+            return torch.exp((bb.clamp_min(eps).log() - aa.clamp_min(eps).log()).mean())
+        return (bb * bb).sum() / (aa * bb).sum().clamp_min(eps)
+
+    s_global = _fit(a, b).clamp(0.05, 20.0)
+    if group_ids is None:
+        return s_global
+
+    g = group_ids.detach().flatten().long()
+    if g.numel() != a.numel():
+        raise ValueError('group_ids must have one entry per PAIR (got %d for %d pairs)'
+                         % (g.numel(), a.numel()))
+    ones = torch.ones_like(a)
+    cnt = torch.zeros(n_groups, device=a.device, dtype=a.dtype).index_add_(0, g, ones)
+    if fit_space == 'log':
+        r = (b.clamp_min(eps).log() - a.clamp_min(eps).log())
+        acc = torch.zeros(n_groups, device=a.device, dtype=a.dtype).index_add_(0, g, r)
+        s = torch.exp(acc / cnt.clamp_min(1.0)).clamp(0.05, 20.0)
+    else:
+        num = torch.zeros(n_groups, device=a.device, dtype=a.dtype).index_add_(0, g, b * b)
+        den = torch.zeros(n_groups, device=a.device, dtype=a.dtype).index_add_(0, g, a * b)
+        s = (num / den.clamp_min(eps)).clamp(0.05, 20.0)
+    return torch.where(cnt >= min_pairs, s, s_global.expand_as(s))
+
+
+def per_pair_mu_scale(s_per_group, center_groups, neighbor_groups):
+    """FIX 2 (Tal, 2026-09-14): which scale a pair uses once each segment has its own.
+
+    An in-segment pair uses its segment's scale. A CROSS-segment pair spans two scales, and
+    charging it to the centre's segment alone is arbitrary -- the same pair would get a different
+    answer if read from the other end. It gets the GEOMETRIC mean instead, because a scale is
+    multiplicative: half and double must cancel to 1, which only sqrt(s_i*s_j) does.
+    """
+    sc = s_per_group[center_groups.long()]
+    sn = s_per_group[neighbor_groups.long()]
+    same = center_groups.long() == neighbor_groups.long()
+    return torch.where(same, sc, (sc * sn).clamp_min(1e-12).sqrt())
+
+
+def spatial_angle_loss(center_points, neighbor_points, center_coords, neighbor_coords,
+                       min_ray_px=14.0, huber_delta=1.0, eps=1e-12):
+    """ANGLE-SPATIAL (Tal, 2026-09-14/15): RKD's angle term in the SPATIAL domain -- the spatial twin
+    of feature_rkd_angle_loss(). For every centre and every ordered pair of distinct neighbours
+    (a, b), the angle AT THE CENTRE between the rays to a and to b must match on both sides:
+        image : rays between PIXEL coordinates                     (frozen, no grad)
+        mesh  : rays between the SOFT-MAPPED 3D points Σ_k w_k·v_k (on the grad path via w)
+    **EUCLIDEAN angles on both sides, Tal's call 2026-09-14** -- image-plane rays vs chordal 3D rays,
+    NOT geodesic/tangent-space angles, unlike L_spatial's geodesic distances. Any figure or note
+    about this term must say "Euclidean angles".
+
+    Scale-invariant by construction (a cosine), so it needs no normaliser and does not interact
+    with mu_3d_scale. Known limit: the photo is a PROJECTION, so image angles equal surface angles
+    only where the surface faces the camera; expect it to pull the wrong way across depth changes.
+
+    min_ray_px: a ray shorter than this (default 14 = one DINO patch) makes the angle noise --
+    both features are nearly identical inside one patch, which is also what makes the smallest
+    segments' pairs unreliable. Any triplet with a short ray on the IMAGE side is dropped.
+
+        center_points   [n, 3]      soft-mapped 3D point of each centre
+        neighbor_points [n, k, 3]   soft-mapped 3D point of each neighbour
+        center_coords   [n, 2]      (row, col) of each centre   (any device/dtype)
+        neighbor_coords [n, k, 2]   (row, col) of each neighbour
+
+    Returns (loss, mean_abs_cos_gap, valid_fraction). Row/col order does not matter: swapping two
+    axes is a reflection, and a reflection preserves every cosine.
+    """
+    dev = center_points.device
+    cc = center_coords.to(dev).float()
+    nc = neighbor_coords.to(dev).float()
+    ray_img = nc - cc.unsqueeze(1)                                            # [n, k, 2]
+    ray_msh = neighbor_points - center_points.unsqueeze(1)                    # [n, k, 3]
+    long_enough = ray_img.norm(dim=-1) >= min_ray_px                          # [n, k]
+
+    e_img = F.normalize(ray_img, dim=-1, eps=eps)
+    e_msh = F.normalize(ray_msh, dim=-1, eps=eps)
+    cos_img = torch.bmm(e_img, e_img.transpose(1, 2))                         # [n, k, k]
+    cos_msh = torch.bmm(e_msh, e_msh.transpose(1, 2))
+
+    k = ray_img.shape[1]
+    off_diag = ~torch.eye(k, dtype=torch.bool, device=dev)
+    valid = off_diag.unsqueeze(0) & long_enough.unsqueeze(2) & long_enough.unsqueeze(1)  # [n, k, k]
+    if not valid.any():
+        zero = center_points.sum() * 0.0
+        return zero, float('nan'), 0.0
+    loss = F.huber_loss(cos_msh[valid], cos_img[valid], delta=huber_delta, reduction='mean')
+    gap = (cos_msh[valid] - cos_img[valid]).abs().mean().item()
+    return loss, gap, valid.float().sum().item() / (valid.shape[0] * k * (k - 1))
+
+
 def relational_loss_geodesic(center_topk_idx, center_weights, neighbor_topk_idx, neighbor_weights,
                              neighbor_coords, geo_table_3d, geo_table_2d_center_rows, pixel_to_node,
-                             mu_3D_reference, mu_2D_reference, mu_3d_scale=1.0, huber_delta=1.0):
+                             mu_3D_reference, mu_2D_reference, mu_3d_scale=1.0, huber_delta=1.0,
+                             return_residuals=False, mu_groups=None, mu_n_groups=None,
+                             return_mu_scale=False, mu_neighbor_groups=None, mu_fit_space='abs'):
     """Geodesic counterpart of relational_loss() above -- same Huber-on-normalized-ratios
     structure, same mu_3d_scale/huber_delta roles, but both distances are geodesic (see this
     module's geodesic-variant docstring) instead of Euclidean, and normalization is against
@@ -560,9 +685,57 @@ def relational_loss_geodesic(center_topk_idx, center_weights, neighbor_topk_idx,
 
     norm_d_2D = d_2D / max(mu_2D_reference, 1e-8)
     norm_d_3D = d_3D / max(mu_3D_reference, 1e-8)
-    if mu_3d_scale != 1.0:
-        norm_d_3D = norm_d_3D / mu_3d_scale
+    # mu_3d_scale (2026-09-14) is now one of three things, see PROJECT_NOTES.md `MU-LEARNED`:
+    #   float          FIXED, the original behaviour (1.0 = no-op)
+    #   'optimal'      CLOSED FORM, refitted every step by optimal_mu_3d_scale(), detached
+    #   Tensor         LEARNED, an nn.Parameter-derived scale the caller backprops through;
+    #                  scalar, or per-GROUP with mu_groups giving each pair's group
+    # mu_groups may be given per CENTRE ([n]) -- every pair of a centre belongs to that centre's
+    # segment -- so expand it to one entry per PAIR before any grouped arithmetic.
+    pair_groups = mu_groups
+    if pair_groups is not None and pair_groups.dim() == 1:
+        pair_groups = pair_groups.to(norm_d_3D.device).unsqueeze(1).expand_as(norm_d_3D)
+    # mu_neighbor_groups [n, k]: each NEIGHBOUR pixel's segment, so an in-segment pair can be told
+    # from a cross-segment one (fixes 1 and 2, 2026-09-14)
+    nbr_groups = mu_neighbor_groups.to(norm_d_3D.device) if mu_neighbor_groups is not None else None
+    in_segment = None if nbr_groups is None else (pair_groups.long() == nbr_groups.long())
+
+    mu_scale_used = mu_3d_scale
+    if isinstance(mu_3d_scale, str):
+        if mu_3d_scale != 'optimal':
+            raise ValueError("mu_3d_scale as a string must be 'optimal', got %r" % mu_3d_scale)
+        mu_scale_used = optimal_mu_3d_scale(norm_d_3D, norm_d_2D,
+                                            group_ids=pair_groups, n_groups=mu_n_groups,
+                                            pair_mask=in_segment, fit_space=mu_fit_space)
+    if torch.is_tensor(mu_scale_used):
+        s = mu_scale_used.to(norm_d_3D.device)
+        if s.numel() == 1:                       # one global scale
+            s = s.reshape(())
+        elif s.dim() == 1:                       # one per GROUP -> expand to one per PAIR
+            if mu_groups is None:
+                raise ValueError('a per-group mu_3d_scale needs mu_groups')
+            if nbr_groups is not None:           # FIX 2: cross-segment pairs get the geometric mean
+                s = per_pair_mu_scale(s, pair_groups.to(s.device), nbr_groups)
+            else:
+                s = s[mu_groups.to(s.device).long()]
+            if s.dim() == 1:                     # mu_groups was per CENTRE: [n] -> [n, 1], broadcasts
+                s = s.unsqueeze(1)
+        if s.dim() > 1 and s.shape not in (norm_d_3D.shape, (norm_d_3D.shape[0], 1)):
+            raise ValueError('mu_3d_scale expanded to %s, expected %s or [n, 1]'
+                             % (tuple(s.shape), tuple(norm_d_3D.shape)))
+        norm_d_3D = norm_d_3D / s
+    elif mu_scale_used != 1.0:
+        norm_d_3D = norm_d_3D / mu_scale_used
 
     loss = F.huber_loss(norm_d_3D, norm_d_2D, delta=huber_delta, reduction='mean')
+
+    if return_mu_scale:
+        return loss, mu_2D_live.item(), mu_3D_live.item(), mu_scale_used
+
+    if return_residuals:
+        # Diagnostic path only (--dump_residuals): the per-pair signed residual the Huber sees.
+        # delta is a transition point ON THIS quantity, so its distribution is what decides
+        # whether delta is doing anything at all -- see train_relational_loss.py's dump block.
+        return loss, mu_2D_live.item(), mu_3D_live.item(), (norm_d_3D - norm_d_2D).detach()
 
     return loss, mu_2D_live.item(), mu_3D_live.item()

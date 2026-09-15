@@ -210,6 +210,16 @@ def main(args):
                 os.path.splitext(output_path)[0] + '_side_by_side.png')
             save_side_by_side(mesh_render_path, img, side_by_side_path, args.background_color)
             print(f'side-by-side (mesh render | back-projected photo) saved to {side_by_side_path}')
+            # 2026-09-08, Tal: never keep both. The side-by-side's right panel is BIT-IDENTICAL to
+            # the standalone PNG (verified 2026-09-07), so keeping both is pure duplication -- and
+            # comparing a 1890x1080 side_by_side against an 810x1080 plain sheet has produced
+            # mismatched-panel figures more than once. Seven scripts already did this `rm` by hand;
+            # it belongs here instead. --keep_plain opts out; --no_side_by_side keeps the plain PNG
+            # by construction (nothing else is written).
+            if not args.keep_plain and os.path.abspath(side_by_side_path) != os.path.abspath(output_path):
+                os.remove(output_path)
+                print(f'removed the duplicate standalone {output_path} '
+                      '(it is the right panel of the side-by-side; pass --keep_plain to keep it)')
 
 
 if __name__ == '__main__':
@@ -237,6 +247,10 @@ if __name__ == '__main__':
                               'k blends colors and softens everything.')
     parser.add_argument('--no_side_by_side', dest='side_by_side', action='store_false',
                          help='skip the mesh-render | back-projected-photo sheet')
+    parser.add_argument('--keep_plain', action='store_true',
+                         help='keep the standalone back-projection PNG alongside the side-by-side. '
+                              'Off by default: the side-by-side already contains it, pixel for '
+                              'pixel, as its right panel.')
     parser.add_argument('--mesh_render_path', type=str, default=None,
                          help='left panel of the side-by-side. Defaults to the render of the very '
                               'coloring being back-projected: <vertex_colors_path>_rendered_views.png '

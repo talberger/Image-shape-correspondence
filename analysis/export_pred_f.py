@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from analysis.verify_encoder_resume import seed_everything
 from modules.encoder import Encoder
+from modules.encoder_l2norm import EncoderL2Norm
 from modules.utils import device, load_state_dict, loadmesh
 
 
@@ -92,6 +93,14 @@ if __name__ == '__main__':
                              '--outputs. Mutually exclusive with --checkpoint/--output.')
     parser.add_argument('--outputs', type=str, default=None,
                         help='BATCH MODE: comma-separated output paths, 1:1 with --checkpoints.')
+    parser.add_argument('--l2norm', action='store_true',
+                        help='build EncoderL2Norm instead of Encoder. REQUIRED for any checkpoint '
+                             'trained by train_encoder_dino_sd_l2norm.py / '
+                             'phase2/train_relational_loss_l2norm.py -- i.e. every current recipe. '
+                             'Tanh and L2Normalize are both parameter-free, so load_state_dict '
+                             'succeeds either way and the WRONG final activation is applied '
+                             'silently; the exported pred_f is then simply wrong, with no error. '
+                             'Added 2026-09-08, when the step-ladder probe needed it.')
     parser.add_argument('--obj_path', type=str, default='./meshes/guitar.obj')
     parser.add_argument('--name', type=str, default='guitar')
     # Must match the training run that produced the checkpoint.
@@ -124,9 +133,11 @@ if __name__ == '__main__':
     mesh = loadmesh(dir=args.obj_path, name=args.name, load_rings=True)
 
     seed_everything(args.seed)
-    encoder = Encoder(args.depth, args.width, out_dim=args.n_classes,
-                      positional_encoding=args.positional_encoding,
-                      sigma=args.sigma, network_verbose=0).to(device)
+    encoder_cls = EncoderL2Norm if args.l2norm else Encoder
+    print(f'building {encoder_cls.__name__}')
+    encoder = encoder_cls(args.depth, args.width, out_dim=args.n_classes,
+                          positional_encoding=args.positional_encoding,
+                          sigma=args.sigma, network_verbose=0).to(device)
 
     for i, (checkpoint_path, output_path) in enumerate(zip(checkpoint_paths, output_paths)):
         if len(checkpoint_paths) > 1:

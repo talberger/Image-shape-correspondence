@@ -193,18 +193,25 @@ def process_vertex_query(idx, args, verts, faces, vertex_features, render_mesh, 
     return panel, tag
 
 
-def build_grid(image_panels, image_labels, mesh_panels, mesh_labels, output_path):
+def build_grid(image_panels, image_labels, mesh_panels, mesh_labels, output_path, nrows=2):
     """Two independent 2-row blocks side by side -- image-domain queries on the
     left, mesh-domain queries on the right -- rather than one row of images
     stacked directly over one row of meshes. Stacking would visually suggest
     each image column corresponds to the mesh column below it, which isn't
     true: the two domains are queried independently (no pixel<->vertex
-    coupling)."""
-    nrows = 2
+    coupling).
+
+    --grid_rows 1 lays every panel out in ONE long row instead (2026-09-08, Tal:
+    easier to compare when several arms are stacked one above the other). A
+    single row cannot imply a false vertical pairing, so the concern above does
+    not apply to it; the image block still comes first, the mesh block second."""
     img_cols = max(1, (len(image_panels) + nrows - 1) // nrows) if image_panels else 0
     mesh_cols = max(1, (len(mesh_panels) + nrows - 1) // nrows) if mesh_panels else 0
     ncols = img_cols + mesh_cols
-    fig, axs = plt.subplots(nrows, ncols, figsize=(ncols * 4.0, nrows * 4.5),
+    # A one-row strip gets taller panels: at nrows*4.5 a single row is 4.5in high, which wastes
+    # most of a 4in-wide cell on portrait guitar panels.
+    panel_h = 4.5 if nrows > 1 else 6.5
+    fig, axs = plt.subplots(nrows, ncols, figsize=(ncols * 4.0, nrows * panel_h),
                              squeeze=False, constrained_layout=True)
     for ax in axs.flat:
         ax.axis('off')
@@ -293,7 +300,8 @@ def main(args):
 
     grid_output_path = args.grid_output_path or os.path.join(args.save_dir, 'simheatmap_grid.png')
     os.makedirs(os.path.dirname(os.path.abspath(grid_output_path)), exist_ok=True)
-    build_grid(image_panels, image_labels, mesh_panels, mesh_labels, grid_output_path)
+    build_grid(image_panels, image_labels, mesh_panels, mesh_labels, grid_output_path,
+               nrows=args.grid_rows)
 
 
 if __name__ == '__main__':
@@ -348,6 +356,11 @@ if __name__ == '__main__':
     parser.add_argument('--marker_min_radius_frac', type=float, default=1.0, help='vertex queries only')
     parser.add_argument('--grid_output_path', type=str, default=None,
                          help='defaults to <save_dir>/simheatmap_grid.png')
+    parser.add_argument('--grid_rows', type=int, default=2,
+                         help='rows in the combined grid. 2 (default) puts the image-query block '
+                              'and the mesh-query block side by side as 2-row blocks; 1 lays every '
+                              'panel out in one long strip, which is what to use when several arms '
+                              'are being stacked one above the other for comparison.')
     parser.add_argument('--background_color', nargs=3, type=int, default=[255, 255, 255])
     parser.add_argument('--transparent_background', type=int, default=None,
                          help='if set (0-255), heatmap panels use this alpha for background pixels')

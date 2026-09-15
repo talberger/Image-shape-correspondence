@@ -14,7 +14,7 @@ cd /workspace/bsb
 ARM_DIR=demo/guitar/$1
 ARM_LABEL=$2
 ARM_EVAL_TAG=$3
-REF=demo/guitar/runs/isobbox/bsb_isobbox_sd_dino_stride14_nosdsquare_T0.01_seed0_phase2
+REF=demo/guitar/runs/isobbox/bsb_isobbox_sdsquash_T0.01_seed0_phase2
 REF_LABEL="ISOBBOX SD+DINO T=0.01 seed0 (reference)"
 EL=demo/guitar/eval_labels
 OUTC=$ARM_DIR/comparison_vs_isobbox_sd_dino

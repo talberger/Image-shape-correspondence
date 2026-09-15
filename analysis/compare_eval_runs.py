@@ -114,8 +114,12 @@ def main(args):
         D = ref
     n = len(runs[0][ERR_KEY['geometric snap']])
 
-    fig = plt.figure(figsize=(14.0, 7.6), dpi=150)
-    gs = fig.add_gridspec(2, 3, height_ratios=[2.3, 0.95 + 0.30 * (label_lines - 1)],
+    # 2026-09-14 (Tal): the labels carry every flag now, so an in-axes legend covered a large part of
+    # the curves. The legend gets its own strip UNDER each panel instead -- the curves stay clear and
+    # the legend still sits with the metric whose AUC it quotes.
+    legend_h = 0.16 * len(runs) + 0.10
+    fig = plt.figure(figsize=(14.0, 7.6 + 0.55 * len(runs)), dpi=150)
+    gs = fig.add_gridspec(3, 3, height_ratios=[2.3, legend_h, 0.95 + 0.30 * (label_lines - 1)],
                           hspace=0.52, wspace=0.42)
 
     for ci, metric in enumerate(METRICS):
@@ -132,14 +136,23 @@ def main(args):
             ax.set_ylabel('correspondence accuracy (%)', fontsize=9.5)
         ax.set_xlim(0, 100 * args.eps_max); ax.set_ylim(0, 100)
         ax.grid(alpha=0.3); ax.tick_params(labelsize=8)
-        ax.legend(loc='lower right', fontsize=7.5)
+        if ci == 0:
+            handles = ax.get_legend_handles_labels()[0]
+
+    # ONE legend for the whole figure, in its own strip under the three panels (Tal, 2026-09-14).
+    # Per-panel legends were tried first and the long labels spilled into the neighbouring panel;
+    # the per-metric AUC they used to carry is in each metric's own table below anyway.
+    ax_leg = fig.add_subplot(gs[1, :]); ax_leg.axis('off')
+    ax_leg.legend(handles, labels, loc='upper center', fontsize=8, frameon=False,
+                  handlelength=2.4, borderaxespad=0.0)
 
     # One table PER METRIC, sitting under its own panel (Tal, 2026-08-26): a single
     # combined table mixes metric and run on the same axis and is hard to read.
     show_t = [0.01, 0.03, 0.05, 0.10]
     col_labels = ['mean'] + [f'@{100*e:g}%' for e in show_t] + ['AUC']
+    tables = []
     for ci, metric in enumerate(METRICS):
-        ax_t = fig.add_subplot(gs[1, ci]); ax_t.axis('off')
+        ax_t = fig.add_subplot(gs[2, ci]); ax_t.axis('off')
         cells, rows, tcolors = [], [], []
         for ri, (d, lab) in enumerate(zip(runs, labels)):
             m = d[MEAN_KEY[metric]]
@@ -153,6 +166,7 @@ def main(args):
             tcolors.append(RUN_COLORS[ri % len(RUN_COLORS)])
         tbl = ax_t.table(cellText=cells, rowLabels=rows, colLabels=col_labels,
                          cellLoc='center', rowLoc='right', loc='upper center')
+        tables.append(tbl)
         tbl.auto_set_font_size(False); tbl.set_fontsize(6.6)
         tbl.scale(0.80, 1.30 * label_lines)
         for (r_i, c_i), cell in tbl.get_celld().items():
@@ -179,7 +193,12 @@ def main(args):
                                      ('geodesic table', 'geo_table_path'), ('mesh', 'obj_path')]
                 if len({d.get(key) for d in runs}) > 1]
 
-    y = -0.015
+    # Start BELOW the tables' real bottom: tbl.scale() grows them past their axes when labels wrap, and a
+    # fixed y put the sources on top of the last rows (found 2026-09-11 with 3-line w_spatial labels).
+    fig.canvas.draw()
+    to_fig = fig.transFigure.inverted()
+    tbl_bottom = min(t.get_window_extent(fig.canvas.get_renderer()).transformed(to_fig).y0 for t in tables)
+    y = min(-0.015, tbl_bottom - 0.02)
     fig.text(0.005, y, 'sources', ha='left', va='top', family='monospace',
              fontsize=7.0, color='0.25', weight='bold')
     y -= 0.026

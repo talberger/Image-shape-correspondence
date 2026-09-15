@@ -144,7 +144,7 @@ BP=back_projection/${MB}_backproj_${CHK_STEM}_soft_snap_k1_side_by_side.png
 BPK1=back_projection/${MB}_backproj_${CHK_STEM}_k1_side_by_side.png
 BP_OLD=back_projection/${MB}_backproj_guitar_mesh_checker16_color_soft_snap_k1_side_by_side.png
 BPK1_OLD=back_projection/${MB}_backproj_guitar_mesh_checker16_color_k1_side_by_side.png
-CTRL=demo/guitar/runs/isobbox/bsb_isobbox_sd_dino_stride14_nosdsquare_T1_seed0_phase2
+CTRL=demo/guitar/runs/isobbox/bsb_isobbox_sdsquash_T1_seed0_phase2
 B001=demo/guitar/runs/oldmesh_sweeps/stride14/bsb_sd_dino_stride14_nosdsquare_T0.01_seed0_phase2
 B1=demo/guitar/runs/oldmesh_sweeps/stride14/bsb_sd_dino_stride14_nosdsquare_T1_seed0_phase2
 
