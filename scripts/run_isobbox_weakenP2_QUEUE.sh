@@ -2,7 +2,7 @@
 # WEAKENING PHASE-2 -- three jobs, 2026-09-09, Tal's call.
 #
 # Premise (Tal): ZS's feature space looks better, phase-2 is visually necessary but has
-# side-effects that may come from training too strongly. --relational_weight is a NO-OP here
+# side-effects that may come from training too strongly. --rkd_spatial_dist_weight is a NO-OP here
 # (single loss term + Adam eps=1e-12 => scale-invariant), so the real knobs are elsewhere.
 #
 #  [1] steps 25 / 50 / 300 of the EXISTING step-ladder, analyzed visually for the first time.

@@ -492,7 +492,7 @@ def geodesic_distance_2d_lookup(neighbor_coords, geo_table_2d_center_rows, pixel
         neighbor_coords          long [n, k, 2]  (row, col) of each neighbour, CPU
         geo_table_2d_center_rows float [n, M]    each of THIS BATCH's centers' own row already
                                                   selected out of the full [num_centers, M] table
-                                                  (see relational_loss_geodesic -- centers are
+                                                  (see rkd_spatial_dist_loss -- centers are
                                                   fixed for the whole run, so this is the same
                                                   n rows every call, but selecting it here keeps
                                                   this function a pure lookup, not knowing about
@@ -587,10 +587,10 @@ def per_pair_mu_scale(s_per_group, center_groups, neighbor_groups):
     return torch.where(same, sc, (sc * sn).clamp_min(1e-12).sqrt())
 
 
-def spatial_angle_loss(center_points, neighbor_points, center_coords, neighbor_coords,
+def rkd_spatial_angle3_loss(center_points, neighbor_points, center_coords, neighbor_coords,
                        min_ray_px=14.0, huber_delta=1.0, eps=1e-12):
-    """ANGLE-SPATIAL (Tal, 2026-09-14/15): RKD's angle term in the SPATIAL domain -- the spatial twin
-    of feature_rkd_angle_loss(). For every centre and every ordered pair of distinct neighbours
+    """rkd_spatial_angle3 (Tal, 2026-09-14/15; tagged ANGLE-SPATIAL until then): RKD's angle term in the SPATIAL domain -- the spatial twin
+    of rkd_feat_angle3_loss(). For every centre and every ordered pair of distinct neighbours
     (a, b), the angle AT THE CENTRE between the rays to a and to b must match on both sides:
         image : rays between PIXEL coordinates                     (frozen, no grad)
         mesh  : rays between the SOFT-MAPPED 3D points Σ_k w_k·v_k (on the grad path via w)
@@ -637,7 +637,7 @@ def spatial_angle_loss(center_points, neighbor_points, center_coords, neighbor_c
     return loss, gap, valid.float().sum().item() / (valid.shape[0] * k * (k - 1))
 
 
-def relational_loss_geodesic(center_topk_idx, center_weights, neighbor_topk_idx, neighbor_weights,
+def rkd_spatial_dist_loss(center_topk_idx, center_weights, neighbor_topk_idx, neighbor_weights,
                              neighbor_coords, geo_table_3d, geo_table_2d_center_rows, pixel_to_node,
                              mu_3D_reference, mu_2D_reference, mu_3d_scale=1.0, huber_delta=1.0,
                              return_residuals=False, mu_groups=None, mu_n_groups=None,
@@ -667,7 +667,7 @@ def relational_loss_geodesic(center_topk_idx, center_weights, neighbor_topk_idx,
     watching these drift is exactly the signal that exposed the original Euclidean-mode collapse).
     """
     if mu_3D_reference is None or mu_2D_reference is None:
-        raise ValueError('relational_loss_geodesic requires both mu_3D_reference and '
+        raise ValueError('rkd_spatial_dist_loss requires both mu_3D_reference and '
                          'mu_2D_reference (fixed geodesic diameters) -- there is no LIVE mode '
                          'here, unlike relational_loss()')
 
@@ -739,3 +739,9 @@ def relational_loss_geodesic(center_topk_idx, center_weights, neighbor_topk_idx,
         return loss, mu_2D_live.item(), mu_3D_live.item(), (norm_d_3D - norm_d_2D).detach()
 
     return loss, mu_2D_live.item(), mu_3D_live.item()
+
+
+# CANONICAL NAMES (Tal, 2026-09-15): rkd_spatial_dist (the geodesic distance term, "L_spatial" /
+# "relational" in older notes) and rkd_spatial_angle3. Old names stay importable.
+relational_loss_geodesic = rkd_spatial_dist_loss
+spatial_angle_loss = rkd_spatial_angle3_loss

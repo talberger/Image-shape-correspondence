@@ -63,12 +63,12 @@ from modules.anchor_loss import anchor_loss
 from modules.dist_loss import dist_loss
 from modules.mapping_loss import (feature_drift, sample_center_pixels,
                                   sample_grid_center_pixels, soft_map_to_vertices)
-from modules.feature_rkd_loss import (feature_rkd_angle_loss, feature_rkd_distance_loss,
-                                      feature_rkd_pairwise_angle_loss, hard_feature,
+from modules.feature_rkd_loss import (rkd_feat_angle3_loss, rkd_feat_dist_loss,
+                                      rkd_feat_angle2_loss, hard_feature,
                                       measure_feature_mu_references, soft_feature)
-from modules.relational_loss import (build_segment_index, relational_loss, relational_loss_geodesic,
+from modules.relational_loss import (build_segment_index, relational_loss, rkd_spatial_dist_loss,
                                      sample_in_segment_neighbors, sample_out_segment_neighbors,
-                                     spatial_angle_loss)
+                                     rkd_spatial_angle3_loss)
 from modules.utils import device, load_state_dict, loadmesh
 from phase2.train_mapping_loss import (assert_resume_is_sane, get_fourier_basis, hash_input,
                                        load_phase1_encoder, set_fourier_basis)
@@ -145,7 +145,7 @@ def measure_mu_3D_reference(encoder, vertices, coords, segment_ids, seg_idx, all
 def measure_feature_mu(encoder, vertices, coords, segment_ids, seg_idx, all_pixel_features,
                       k_vertices_per_pixel, num_neighbors_in_segment, num_neighbors_out_segment,
                       temperature=1.0, num_samples=5, student_mode='soft', mu_stat='mean'):
-    """The two FIXED feature-space normalizers feature_rkd_distance_loss() needs -- measured once, here,
+    """The two FIXED feature-space normalizers rkd_feat_dist_loss() needs -- measured once, here,
     from the untouched phase-1 encoder, before any phase-2 training happens.
 
     Exactly the same construction, and the same reasoning, as measure_mu_3D_reference above: a
@@ -536,14 +536,14 @@ def train(args):
                 cyc_geo_table_2d_path, args.object_mask_path, coords,
                 args.num_center_pixels, args.seed)
         # Normalized ONCE here (center_geo_dist is fixed for the whole run, unlike
-        # relational_loss_geodesic's own norm_d_2D which is recomputed every step against
+        # rkd_spatial_dist_loss's own norm_d_2D which is recomputed every step against
         # resampled neighbours) -- same divide-by-geodesic-diameter convention as
         # relational_loss.py's norm_d_2D, so cyc_loss lands in roughly the same [0, ~1] range as
         # relational_loss instead of raw geodesic pixels (~0-1169.7px on this mesh/mask).
         # Tal's explicit call, following SHIC's own stated principle ("values that make the
         # losses roughly of similar scale") rather than reusing SHIC's literal beta -- our two
         # losses don't share SHIC's raw scale, but normalizing puts them on comparable footing so
-        # --relational_weight/--cyc_weight sweep values are directly comparable, unlike raw pixels.
+        # --rkd_spatial_dist_weight/--cyc_weight sweep values are directly comparable, unlike raw pixels.
         center_geo_dist = precompute_center_pixel_geodesic_distances(
             coords, cyc_geo_table_2d, cyc_pixel_to_node).to(device) / max(cyc_geo_diag_2d, 1e-8)
         print('  cycle-consistency loss: ON (--cyc_weight %g, %s variant), round trip '
@@ -670,8 +670,9 @@ def train(args):
     # encoder as mu_3D above, for the same anti-collapse reason. Skipped entirely when neither
     # feature term is in use and nothing asked for their magnitudes.
     mu_img_reference = mu_msh_reference = None
-    if (args.feat_dist_weight > 0.0 or args.feat_angle_weight > 0.0
-            or args.feat_pair_angle_weight > 0.0 or args.log_feature_terms):
+    if (args.rkd_feat_dist_weight > 0.0 or args.rkd_feat_angle3_weight > 0.0
+            or args.rkd_feat_angle2_weight > 0.0 or args.log_feature_terms
+            or args.rkd_feat_angle2_balance):
         if args.feat_mu_mode == 'fixed':
             mu_img_reference, mu_msh_reference = measure_feature_mu(
                 encoder, vertices, coords, segment_ids, seg_idx, all_pixel_features,
@@ -694,17 +695,17 @@ def train(args):
         # 2026-09-04: the pair-angle weight MUST be printed here too. It was missing when the flag
         # was added, so a run with only the pair-angle term on printed "beta=0, gamma=0" and read
         # as though no feature term were active at all -- exactly backwards.
-        print('  feature-RKD weights: beta (distance)=%g, gamma (3-point angle)=%g, '
-              'pair-angle (2-point)=%g%s'
-              % (args.feat_dist_weight, args.feat_angle_weight, args.feat_pair_angle_weight,
+        print('  feature-RKD weights: rkd_feat_dist=%g, rkd_feat_angle3=%g, '
+              'rkd_feat_angle2=%g%s'
+              % (args.rkd_feat_dist_weight, args.rkd_feat_angle3_weight, args.rkd_feat_angle2_weight,
                  '  [logging only, no feature term is in the optimized loss]'
-                 if (args.feat_dist_weight == 0.0 and args.feat_angle_weight == 0.0
-                     and args.feat_pair_angle_weight == 0.0) else ''))
+                 if (args.rkd_feat_dist_weight == 0.0 and args.rkd_feat_angle3_weight == 0.0
+                     and args.rkd_feat_angle2_weight == 0.0) else ''))
         print('  feature-RKD detach: features=%s, weights=%s  (gradFW = neither, '
               'gradF = weights detached, gradW = features detached)'
               % (args.feat_detach_features, args.feat_detach_weights))
-        if args.relational_weight == 0.0:
-            print('  *** relational_weight=0: the SPATIAL term is OFF -- nothing anchors the map '
+        if args.rkd_spatial_dist_weight == 0.0:
+            print('  *** rkd_spatial_dist_weight=0: the SPATIAL term is OFF -- nothing anchors the map '
                   'to geometry (2026-09-04: this diverged when tried) ***')
 
     print('  distance_weight: %s' % (args.distance_weight or 'none (every pair weighted equally)'))
@@ -825,7 +826,7 @@ def train(args):
             # see modules/relational_loss.py's geodesic-variant docstring for why the collapsed
             # point can't be used here the way it is for Euclidean distance.
             # soft_points (the collapsed Σ w·v point) is unused by the geodesic distance, but
-            # --spatial_angle_weight needs it: Euclidean angles are measured between these points.
+            # --rkd_spatial_angle3_weight needs it: Euclidean angles are measured between these points.
             soft_points, topk_idx, weights = soft_map_to_vertices(
                 pixel_features, vertex_features, vertices, args.k_vertices_per_pixel,
                 return_topk=True, temperature=args.temperature)
@@ -837,7 +838,7 @@ def train(args):
             neighbor_weights = weights[num_centers:].view(
                 num_centers, num_neighbors, args.k_vertices_per_pixel)
 
-            _rl = relational_loss_geodesic(
+            _rl = rkd_spatial_dist_loss(
                 center_topk_idx, center_weights, neighbor_topk_idx, neighbor_weights,
                 neighbor_coords, geo_table_3d, geo_table_2d_center_rows, pixel_to_node,
                 mu_3D_reference=mu_3D_reference, mu_2D_reference=mu_2D_reference,
@@ -895,51 +896,55 @@ def train(args):
                 distance_weight=args.distance_weight, mu_3d_scale=args.mu_3d_scale,
                 huber_delta=args.huber_delta)
 
-        loss = args.relational_weight * loss
+        loss = args.rkd_spatial_dist_weight * loss
+        sdist_loss = loss  # the weighted rkd_spatial_dist term alone -- reference for --rkd_feat_angle2_balance
 
-        # --- ANGLE-SPATIAL (added 2026-09-15) ------------------------------------------------
+        # --- rkd_spatial_angle3 (added 2026-09-15 as ANGLE-SPATIAL) ------------------------------------------------
         # RKD's angle term in the SPATIAL domain, EUCLIDEAN angles (image-plane rays vs chords
-        # between the soft-mapped 3D points) -- see spatial_angle_loss(). Weight 0.0 skips the
+        # between the soft-mapped 3D points) -- see rkd_spatial_angle3_loss(). Weight 0.0 skips the
         # block, so every earlier run is bit-identical.
         sang_raw = sang_gap = sang_valid = float('nan')
-        if args.spatial_angle_weight > 0.0 or args.spatial_angle_balance:
+        if args.rkd_spatial_angle3_weight > 0.0 or args.rkd_spatial_angle3_balance:
             if not args.geodesic:
-                raise SystemExit('--spatial_angle_weight is only wired into the --geodesic branch')
-            sang_loss, sang_gap, sang_valid = spatial_angle_loss(
+                raise SystemExit('--rkd_spatial_angle3_weight is only wired into the --geodesic branch')
+            sang_loss, sang_gap, sang_valid = rkd_spatial_angle3_loss(
                 soft_points[:num_centers],
                 soft_points[num_centers:].view(num_centers, num_neighbors, 3),
-                coords, neighbor_coords, min_ray_px=args.spatial_angle_min_ray_px,
+                coords, neighbor_coords, min_ray_px=args.rkd_spatial_angle3_min_ray_px,
                 huber_delta=args.huber_delta)
             sang_raw = sang_loss.item()
-            if args.spatial_angle_balance:
+            if args.rkd_spatial_angle3_balance:
                 # Same rule as every other term: under Adam only the RATIO of gradient norms matters.
                 params = [p for p in encoder.parameters() if p.requires_grad]
                 def _gn(t):
                     gs = torch.autograd.grad(t, params, retain_graph=True, allow_unused=True)
                     return torch.sqrt(sum((g.float() ** 2).sum() for g in gs if g is not None)).item()
                 g_rel, g_ang = _gn(loss), _gn(sang_loss)
-                print('--- spatial angle balance (Euclidean angles, min ray %g px)'
-                      % args.spatial_angle_min_ray_px)
-                print('    relational   : loss %.6e  grad norm %.4e' % (loss.item(), g_rel))
-                print('    spatial angle: loss %.6e  grad norm %.4e  |cos gap| %.4f  valid triplets %.3f'
+                print('--- rkd_spatial_angle3 balance (Euclidean angles, min ray %g px)'
+                      % args.rkd_spatial_angle3_min_ray_px)
+                print('    rkd_spatial_dist  : loss %.6e  grad norm %.4e' % (loss.item(), g_rel))
+                print('    rkd_spatial_angle3: loss %.6e  grad norm %.4e  |cos gap| %.4f  valid triplets %.3f'
                       % (sang_raw, g_ang, sang_gap, sang_valid))
                 for r in (1.0, 3.0, 10.0):
-                    print('    spatial_angle_weight at 1/%g of relational: %.4e'
+                    print('    rkd_spatial_angle3_weight at 1/%g of rkd_spatial_dist: %.4e'
                           % (r, g_rel / (r * max(g_ang, 1e-30))))
-                print('--- (--spatial_angle_balance: diagnostic only, stopping before backward)')
+                print('--- (--rkd_spatial_angle3_balance: diagnostic only, stopping before backward)')
                 return
-            loss = loss + args.spatial_angle_weight * sang_loss
+            loss = loss + args.rkd_spatial_angle3_weight * sang_loss
 
         # --- ZS anchor (added 2026-09-10)---------------------------------------------------
         # The only ABSOLUTE term in phase-2: CE of the student's distribution over all vertices
         # against the frozen phase-1 one, on the same center pixels. Weight 0.0 skips the block,
         # so every pre-existing run is bit-identical (no RNG is consumed here either way).
         anc_kl = anc_agree = float('nan')
-        if args.anchor_weight > 0.0 or args.anchor_balance_from:
+        # --rkd_feat_angle2_balance reuses --anchor_balance_from only to LOAD the step-25 state; the anchor's
+        # own balance diagnostic (which returns) must then be skipped so the feature block is reached.
+        _anchor_diag = args.anchor_balance_from and not args.rkd_feat_angle2_balance
+        if args.anchor_weight > 0.0 or _anchor_diag:
             anc_loss, anc_kl, anc_agree = anchor_loss(
                 pixel_features[:num_centers], vertex_features, phase1_features,
                 args.anchor_temperature, hard=args.anchor_hard)
-            if args.anchor_balance_from:
+            if _anchor_diag:
                 # Under Adam a constant factor on the WHOLE loss cancels, but the RATIO between
                 # two terms does not -- so lambda is chosen where the two gradient norms match.
                 params = [p for p in encoder.parameters() if p.requires_grad]
@@ -1003,8 +1008,9 @@ def train(args):
         # magnitudes can be read off a run that does not yet use them.
         feat_dist_raw = feat_angle_raw = cos_gap = float('nan')
         mu_img_live = mu_msh_live = float('nan')
-        if (args.feat_dist_weight > 0.0 or args.feat_angle_weight > 0.0
-            or args.feat_pair_angle_weight > 0.0 or args.log_feature_terms):
+        if (args.rkd_feat_dist_weight > 0.0 or args.rkd_feat_angle3_weight > 0.0
+            or args.rkd_feat_angle2_weight > 0.0 or args.log_feature_terms
+            or args.rkd_feat_angle2_balance):
             img_center = pixel_features[:num_centers]
             img_neighbors = pixel_features[num_centers:].view(num_centers, num_neighbors, -1)
             # --feat_detach_weights (2026-08-29): THE CIRCULARITY TEST. `weights` come from a softmax
@@ -1032,45 +1038,62 @@ def train(args):
             msh_center = msh_all[:num_centers]
             msh_neighbors = msh_all[num_centers:].view(num_centers, num_neighbors, -1)
 
-            fd_loss, mu_img_live, mu_msh_live = feature_rkd_distance_loss(
+            fd_loss, mu_img_live, mu_msh_live = rkd_feat_dist_loss(
                 img_center, img_neighbors, msh_center, msh_neighbors,
                 mu_img_reference=mu_img_reference, mu_msh_reference=mu_msh_reference,
                 huber_delta=args.huber_delta)
-            fa_loss, cos_gap = feature_rkd_angle_loss(
+            fa_loss, cos_gap = rkd_feat_angle3_loss(
                 img_center, img_neighbors, msh_center, msh_neighbors,
                 huber_delta=args.huber_delta)
             # PAIRWISE (2-point) angle, Tal's variant 2026-09-04 -- cos(center, neighbour), one
-            # per pair, no mu anywhere. See feature_rkd_pairwise_angle_loss' docstring for how it
+            # per pair, no mu anywhere. See rkd_feat_angle2_loss' docstring for how it
             # differs from the 3-point fa_loss above. Always COMPUTED when the block runs (it is a
             # cheap [n,k] cosine) so its raw magnitude is logged even at weight 0 -- that is how the
             # weight gets chosen, rather than guessed.
             #
-            # --feat_pair_angle_neighbors in_segment (Tal, 2026-09-04): use only the CLOSE
+            # --rkd_feat_angle2_neighbors in_segment (Tal, 2026-09-04; old flag --feat_pair_angle_neighbors): use only the CLOSE
             # neighbours. The neighbour axis is built as cat([in_segment, out_segment], dim=1) (see
             # the sampling above), so the first --num_neighbors_in_segment entries ARE the close
             # ones and a plain prefix slice is exactly right. THIS SLICE APPLIES TO THE PAIR-ANGLE
             # TERM ONLY -- the geometric relational loss above still sees all 16, so the matched
             # control (the spatial-only run) stays a ONE-variable comparison.
-            if args.feat_pair_angle_neighbors == 'in_segment':
+            if args.rkd_feat_angle2_neighbors == 'in_segment':
                 n_close = args.num_neighbors_in_segment
                 pa_img_neighbors = img_neighbors[:, :n_close]
                 pa_msh_neighbors = msh_neighbors[:, :n_close]
             else:
                 pa_img_neighbors = img_neighbors
                 pa_msh_neighbors = msh_neighbors
-            fpa_loss, pair_cos_gap = feature_rkd_pairwise_angle_loss(
+            fpa_loss, pair_cos_gap = rkd_feat_angle2_loss(
                 img_center, pa_img_neighbors, msh_center, pa_msh_neighbors,
                 huber_delta=args.huber_delta)
             feat_dist_raw = fd_loss.item()
             feat_angle_raw = fa_loss.item()
             feat_pair_angle_raw = fpa_loss.item()
+            if args.rkd_feat_angle2_balance:
+                # Same rule as every other term: under Adam only the RATIO of gradient norms matters.
+                params = [p for p in encoder.parameters() if p.requires_grad]
+                def _gn2(t):
+                    gs = torch.autograd.grad(t, params, retain_graph=True, allow_unused=True)
+                    return torch.sqrt(sum((g.float() ** 2).sum() for g in gs if g is not None)).item()
+                g_sd, g_fa2 = _gn2(sdist_loss), _gn2(fpa_loss)
+                print('--- rkd_feat_angle2 balance (neighbours: %s, student: %s)'
+                      % (args.rkd_feat_angle2_neighbors, args.feat_student_mode))
+                print('    rkd_spatial_dist : loss %.6e  grad norm %.4e' % (sdist_loss.item(), g_sd))
+                print('    rkd_feat_angle2  : loss %.6e  grad norm %.4e  |cos gap| %.4f'
+                      % (feat_pair_angle_raw, g_fa2, pair_cos_gap))
+                for r in (1.0, 3.0, 10.0):
+                    print('    rkd_feat_angle2_weight at 1/%g of rkd_spatial_dist: %.4e'
+                          % (r, g_sd / (r * max(g_fa2, 1e-30))))
+                print('--- (--rkd_feat_angle2_balance: diagnostic only, stopping before backward)')
+                return
 
-            if args.feat_dist_weight > 0.0:
-                loss = loss + args.feat_dist_weight * fd_loss
-            if args.feat_angle_weight > 0.0:
-                loss = loss + args.feat_angle_weight * fa_loss
-            if args.feat_pair_angle_weight > 0.0:
-                loss = loss + args.feat_pair_angle_weight * fpa_loss
+            if args.rkd_feat_dist_weight > 0.0:
+                loss = loss + args.rkd_feat_dist_weight * fd_loss
+            if args.rkd_feat_angle3_weight > 0.0:
+                loss = loss + args.rkd_feat_angle3_weight * fa_loss
+            if args.rkd_feat_angle2_weight > 0.0:
+                loss = loss + args.rkd_feat_angle2_weight * fpa_loss
 
         if args.balance_weight > 0.0:
             bal_loss, bal_f, bal_P = vertex_balance_loss(
@@ -1110,11 +1133,11 @@ def train(args):
             bal_str = ('' if args.balance_weight == 0.0 else
                       '  bal=%.4f cov=%d/%d' % (bal_loss.item(), int((bal_f > 0).sum().item()),
                                                  vertices.shape[0]))
-            feat_str = ('' if (args.feat_dist_weight == 0.0 and args.feat_angle_weight == 0.0
-                               and args.feat_pair_angle_weight == 0.0
+            feat_str = ('' if (args.rkd_feat_dist_weight == 0.0 and args.rkd_feat_angle3_weight == 0.0
+                               and args.rkd_feat_angle2_weight == 0.0
                                and not args.log_feature_terms) else
-                        '  featD=%.6f featA=%.6f featPA=%.6f (raw, unweighted; cos_gap=%.4f '
-                        'pair_cos_gap=%.4f mu_img_live=%.5f mu_msh_live=%.5f)'
+                        '  feat_dist=%.6f feat_angle3=%.6f feat_angle2=%.6f (raw, unweighted; angle3_cos_gap=%.4f '
+                        'angle2_cos_gap=%.4f mu_img_live=%.5f mu_msh_live=%.5f)'
                         % (feat_dist_raw, feat_angle_raw, feat_pair_angle_raw, cos_gap,
                            pair_cos_gap, mu_img_live, mu_msh_live))
             anc_str = ('' if args.anchor_weight == 0.0 else
@@ -1131,8 +1154,8 @@ def train(args):
                 mu_str = ('  mu_s=%.4f' % s.item() if s.numel() == 1 else
                           '  mu_s[min/med/max]=%.3f/%.3f/%.3f' %
                           (s.min().item(), s.median().item(), s.max().item()))
-            sang_str = ('' if args.spatial_angle_weight == 0.0 else
-                        '  sangle=%.5f (raw) cos_gap=%.4f valid=%.3f' % (sang_raw, sang_gap, sang_valid))
+            sang_str = ('' if args.rkd_spatial_angle3_weight == 0.0 else
+                        '  spatial_angle3=%.5f (raw) cos_gap=%.4f valid=%.3f' % (sang_raw, sang_gap, sang_valid))
             print('step %4d/%d  loss %.6f (mu_2D=%.3f mu_3D_live=%.5f, ref_2D=%s ref_3D=%s)%s%s%s%s%s%s%s  '
                   'drift(cos vs phase 1) %.4f'
                   % (step, args.num_iters, loss.item(), mu_2D, mu_3D_live,
@@ -1176,6 +1199,14 @@ def train(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    # CANONICAL LOSS NAMES (Tal, 2026-09-15) -- one name per term everywhere (flags, logs, notes, run tags):
+    #   rkd_spatial_dist   (tag sdist)   geodesic distance, 2 points       old: --relational_weight, "L_spatial"
+    #   rkd_spatial_angle3 (tag sangle3) Euclidean angle at centre, 3 pts  old: --spatial_angle_*, ANGLE-SPATIAL
+    #   rkd_feat_dist      (tag fdist)   feature distance, 2 points       old: --feat_dist_weight, featD
+    #   rkd_feat_angle2    (tag fangle2) feature cosine, 2 points         old: --feat_pair_angle_*, featPA
+    #   rkd_feat_angle3    (tag fangle3) feature angle at centre, 3 pts   old: --feat_angle_weight, featA, RKD-A
+    # Run tags carry the weight after _w, e.g. sangle3_w8.83e-3. Old flags remain as aliases (same dest), so
+    # old scripts and run_config.json files still reproduce.
     # Mesh / phase-1 checkpoint. The Encoder args MUST match the phase-1 run
     # (README step 2 used --model_type dino --width 1024 --n_classes 1024) or
     # the state dict will not load.
@@ -1224,17 +1255,17 @@ if __name__ == '__main__':
                              'grid (sample_grid_center_pixels) -- must match the --center_mode '
                              'grid table\'s own --grid_stride it was built with '
                              '(analysis/build_geodesic_tables.py).')
-    parser.add_argument('--feat_dist_weight', type=float, default=0.0,
+    parser.add_argument('--rkd_feat_dist_weight', '--feat_dist_weight', type=float, default=0.0,
                         help='beta -- weight of the feature-space RKD-D term (distance between two '
                              'IMAGE features vs distance between the two corresponding MESH '
                              'features). 0.0 = off, and every pre-existing run is bit-identical at '
                              'the default. See modules/feature_rkd_loss.py.')
-    parser.add_argument('--feat_angle_weight', type=float, default=0.0,
+    parser.add_argument('--rkd_feat_angle3_weight', '--feat_angle_weight', type=float, default=0.0,
                         help='gamma -- weight of the feature-space RKD-A term (angle at a center, '
                              'formed with two of its neighbours, in image-feature space vs in '
                              'mesh-feature space). 0.0 = off. Needs no normalizer: a cosine is '
                              'already scale-free.')
-    parser.add_argument('--feat_pair_angle_weight', type=float, default=0.0,
+    parser.add_argument('--rkd_feat_angle2_weight', '--feat_pair_angle_weight', type=float, default=0.0,
                         help='weight of the PAIRWISE (2-point) feature angle term, Tal 2026-09-04: '
                              'cos(center, neighbour) in image-feature space vs in mesh-feature '
                              'space, ONE per (center, neighbour) pair -- the same 2-point structure '
@@ -1242,10 +1273,10 @@ if __name__ == '__main__':
                              'mu is needed anywhere. NOT the same as --feat_angle_weight, which is '
                              "the paper's 3-point angle between two NEIGHBOURS at the center. "
                              'Intended as an ADDITIVE term alongside the geometric relational loss. '
-                             '0.0 = off, and the raw value is logged as featPA even at 0 so the '
+                             '0.0 = off, and the raw value is logged as feat_angle2 even at 0 so the '
                              'weight can be chosen from a measurement. Start an order of magnitude '
                              'below the 3-point term (gamma=0.2 collapsed a run).')
-    parser.add_argument('--feat_pair_angle_neighbors', type=str, default='all',
+    parser.add_argument('--rkd_feat_angle2_neighbors', '--feat_pair_angle_neighbors', type=str, default='all',
                         choices=['all', 'in_segment'],
                         help="which neighbours the PAIRWISE angle term uses. 'all' (default) = "
                              'every sampled neighbour, i.e. in-segment + out-of-segment, and is '
@@ -1256,6 +1287,11 @@ if __name__ == '__main__':
                              'the geometric relational loss still uses every neighbour, so a run '
                              'with this flag differs from the spatial-only control by the '
                              'pair-angle term alone.')
+    parser.add_argument('--rkd_feat_angle2_balance', action='store_true',
+                        help='diagnostic: print the rkd_spatial_dist and rkd_feat_angle2 gradient norms and the '
+                             'rkd_feat_angle2 weight at equal / 1/3 / 1/10, then stop before backward. Pair with '
+                             '--anchor_balance_from <checkpoint> to measure on a drifted state (the anchor '
+                             'diagnostic itself is skipped).')
     parser.add_argument('--feat_detach_weights', action='store_true',
                         help='CIRCULARITY TEST: detach the soft-map weights inside soft_feature(), '
                              'so the feature-RKD terms can only be reduced by changing vertex '
@@ -1451,15 +1487,15 @@ if __name__ == '__main__':
                         help='--mu_mode learned: lr for the scale parameter only (its own Adam '
                              'param group). Much larger than the encoder lr on purpose -- it is '
                              'one number and it has 300 steps to arrive.')
-    # ANGLE-SPATIAL (2026-09-15, Tal) -- see PROJECT_NOTES.md and spatial_angle_loss().
-    parser.add_argument('--spatial_angle_weight', type=float, default=0.0,
+    # rkd_spatial_angle3 (2026-09-15, Tal; old flags --spatial_angle_* still accepted) -- see rkd_spatial_angle3_loss().
+    parser.add_argument('--rkd_spatial_angle3_weight', '--spatial_angle_weight', type=float, default=0.0,
                         help='weight of RKD\'s angle term in the SPATIAL domain: the angle at each '
                              'centre between rays to two neighbours, image pixels vs soft-mapped 3D '
                              'points. EUCLIDEAN angles on both sides. 0.0 (default) = off, bit-identical.')
-    parser.add_argument('--spatial_angle_min_ray_px', type=float, default=14.0,
+    parser.add_argument('--rkd_spatial_angle3_min_ray_px', '--spatial_angle_min_ray_px', type=float, default=14.0,
                         help='drop triplets with an image-side ray shorter than this (default 14 = one '
                              'DINO patch; shorter rays give noise angles).')
-    parser.add_argument('--spatial_angle_balance', action='store_true',
+    parser.add_argument('--rkd_spatial_angle3_balance', '--spatial_angle_balance', action='store_true',
                         help='diagnostic: print the relational and spatial-angle gradient norms and the '
                              'weight at equal / 1/3 / 1/10 of relational, then stop before backward. '
                              'Pair with --anchor_balance_from <checkpoint> to measure on a drifted state.')
@@ -1474,7 +1510,7 @@ if __name__ == '__main__':
                              'residual -- Tal\'s 2026-08-12 hypothesis for counteracting excessive '
                              'convergence (the headstock-drift family of problems). Composes with '
                              '--distance_weight and any normalization mode above.')
-    parser.add_argument('--relational_weight', type=float, default=1.0,
+    parser.add_argument('--rkd_spatial_dist_weight', '--relational_weight', type=float, default=1.0,
                         help='Weight for the base relational term: loss = relational_weight * '
                              'relational_loss(...) + cyc_weight * cycle_consistency_loss(...) + '
                              'balance_weight * vertex_balance_loss(...). 1.0, the default, is a '
@@ -1523,7 +1559,7 @@ if __name__ == '__main__':
                              'distance substituted for Euclidean). Requires a 2D geodesic table '
                              '(analysis/build_geodesic_tables.py, see --geo_table_2d_path) even '
                              'when --geodesic itself is off. Its round-trip distance is '
-                             'normalized by the same geodesic diameter relational_loss_geodesic '
+                             'normalized by the same geodesic diameter rkd_spatial_dist_loss '
                              'uses (see train()\'s own cyc_geo_diag_2d division and '
                              'modules/cycle_consistency_loss.py\'s docstring) so it lands in '
                              'roughly the same [0,~1] range as relational_loss -- start a sweep '

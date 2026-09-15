@@ -26,7 +26,7 @@ THE PAPER'S EQUATIONS, AND WHAT WE CHANGED
   l_delta         = Huber
 
 LIVE mu WAS BROKEN UNTIL 2026-08-29 -- it detached the student normalizer and collapsed the
-model to a point. Fixed below; see the comment in feature_rkd_distance_loss. Any result recorded
+model to a point. Fixed below; see the comment in rkd_feat_dist_loss. Any result recorded
 against `--feat_mu_mode live` before that date tested the bug, not the paper.
 
 ONE DELIBERATE DEPARTURE: the paper recomputes mu from the live batch every step. We default to a
@@ -114,10 +114,10 @@ def _pair_distances(center_feats, neighbor_feats, eps):
     return (diff.pow(2).sum(-1) + eps).sqrt()
 
 
-def feature_rkd_distance_loss(img_center, img_neighbors, msh_center, msh_neighbors,
+def rkd_feat_dist_loss(img_center, img_neighbors, msh_center, msh_neighbors,
                               mu_img_reference=None, mu_msh_reference=None,
                               huber_delta=1.0, eps=1e-12):
-    """RKD-D on features. Teacher = image features (frozen), student = mesh features.
+    """rkd_feat_dist (RKD-D, 2 points) on features. Teacher = image features (frozen), student = mesh features.
 
         img_center    [n, F]      frozen photo feature at each center pixel
         img_neighbors [n, k, F]   frozen photo feature at each neighbour pixel
@@ -157,9 +157,9 @@ def feature_rkd_distance_loss(img_center, img_neighbors, msh_center, msh_neighbo
     return loss, float(mu_img_live), float(mu_msh_live)
 
 
-def feature_rkd_angle_loss(img_center, img_neighbors, msh_center, msh_neighbors,
+def rkd_feat_angle3_loss(img_center, img_neighbors, msh_center, msh_neighbors,
                            huber_delta=1.0, eps=1e-12):
-    """RKD-A on features. The triplet is (neighbour_a, CENTER, neighbour_b) and the angle is the one
+    """rkd_feat_angle3 (RKD-A, 3 points) on features. The triplet is (neighbour_a, CENTER, neighbour_b) and the angle is the one
     AT THE CENTER -- which is what the existing center/neighbour sampling already gives us for free,
     with no new sampling machinery.
 
@@ -191,11 +191,11 @@ def feature_rkd_angle_loss(img_center, img_neighbors, msh_center, msh_neighbors,
     return loss, float((cos_msh - cos_img).abs().mean().detach())
 
 
-def feature_rkd_pairwise_angle_loss(img_center, img_neighbors, msh_center, msh_neighbors,
+def rkd_feat_angle2_loss(img_center, img_neighbors, msh_center, msh_neighbors,
                                     huber_delta=1.0, eps=1e-12):
-    """PAIRWISE (2-point) angle on features -- Tal's variant, 2026-09-04. NOT the paper's RKD-A.
+    """rkd_feat_angle2: PAIRWISE (2-point) angle on features -- Tal's variant, 2026-09-04. NOT the paper's RKD-A.
 
-    THE DIFFERENCE FROM feature_rkd_angle_loss(), which matters and is easy to blur:
+    THE DIFFERENCE FROM rkd_feat_angle3_loss(), which matters and is easy to blur:
       * RKD-A (the paper, above) is 3-POINT: it builds the difference vectors e_a = n_a - center
         and e_b = n_b - center, and matches <e_a, e_b> -- the angle AT the center subtended by two
         NEIGHBOURS. Every ordered neighbour pair contributes, so the term is O(k^2) per center.
@@ -222,7 +222,7 @@ def feature_rkd_pairwise_angle_loss(img_center, img_neighbors, msh_center, msh_n
         msh_neighbors [n, k, F]   mesh feature at each neighbour pixel
 
     Returns (loss, mean_abs_cos_gap) -- the diagnostic is the average |teacher cos - student cos|
-    BEFORE the Huber, in readable units, same convention as feature_rkd_angle_loss.
+    BEFORE the Huber, in readable units, same convention as rkd_feat_angle3_loss.
     """
     cos_img = F.cosine_similarity(img_center.unsqueeze(1), img_neighbors,
                                   dim=-1, eps=eps)          # [n, k], no grad (frozen teacher)
@@ -235,7 +235,7 @@ def feature_rkd_pairwise_angle_loss(img_center, img_neighbors, msh_center, msh_n
 
 def measure_feature_mu_references(img_center, img_neighbors, msh_center, msh_neighbors, eps=1e-12,
                                   stat='mean'):
-    """The two FIXED normalizers feature_rkd_distance_loss() needs, measured from ONE draw.
+    """The two FIXED normalizers rkd_feat_dist_loss() needs, measured from ONE draw.
 
     Callers should average this over several independent neighbour draws, exactly as
     train_relational_loss.py's measure_mu_3D_reference already does -- any single draw of
@@ -263,3 +263,10 @@ def measure_feature_mu_references(img_center, img_neighbors, msh_center, msh_nei
     with torch.no_grad():
         return (reduce(_pair_distances(img_center, img_neighbors, eps)),
                 reduce(_pair_distances(msh_center, msh_neighbors, eps)))
+
+
+# CANONICAL NAMES (Tal, 2026-09-15): rkd_feat_dist / rkd_feat_angle2 / rkd_feat_angle3. The old names stay
+# importable so older code and archived notes still resolve.
+feature_rkd_distance_loss = rkd_feat_dist_loss
+feature_rkd_pairwise_angle_loss = rkd_feat_angle2_loss
+feature_rkd_angle_loss = rkd_feat_angle3_loss

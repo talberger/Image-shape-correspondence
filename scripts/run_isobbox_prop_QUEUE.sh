@@ -4,7 +4,7 @@
 # demo/guitar/runs/isobbox_prop/ (the `_mu_` token routes it, lib_isobbox_common.sh run_dir).
 #
 # Usage: ./run_isobbox_prop_QUEUE.sh "<name_tag>|<extra trainer flags>|<label>" [...]
-#   e.g. ./run_isobbox_prop_QUEUE.sh "sangle1e-2|--spatial_angle_weight 1e-2|+ spatial angle (Euclidean) w=1e-2"
+#   e.g. ./run_isobbox_prop_QUEUE.sh "sangle3_w1e-2|--rkd_spatial_angle3_weight 1e-2|+ rkd_spatial_angle3 (Euclidean) w=1e-2"
 #   name_tag is appended after mu_learn_perseg: ..._mu_learn_perseg_<name_tag>_T1_seed0_phase2
 #   env: VS_SECONDARY=1 also compares against the SECONDARY baseline (anchor+cycle+L_dist) -- use it
 #        for any arm that adds a feature-domain term. SMALL analysis by default (SMALL= for full).

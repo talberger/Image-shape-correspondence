@@ -19,7 +19,7 @@ EG=experiments/guitar; E=$EVALDIR/eval_
 OUT=$RUNS/comparison_cycv2_T${CYC_T}_sweep${OUT_SUFFIX}; mkdir -p "$OUT"
 LABEL_S=${LABEL_S-strong}; LABEL_B=${LABEL_B-balanced, 1/50 of anchor}; LABEL_W=${LABEL_W-weak}
 CHK=$(basename "${CHECKER%.pth}")
-# RW_S/RW_B/RW_W (2026-09-11): per-row --relational_weight (w_spatial), matching run_isobbox_cycv2_QUEUE.sh's REL_W tag
+# RW_S/RW_B/RW_W (2026-09-11): per-row --rkd_spatial_dist_weight (w_spatial), matching run_isobbox_cycv2_QUEUE.sh's REL_W tag
 rt() { [ "${1:-1}" = 1 ] || echo "_rkdw$1"; }
 run() { echo "bsb_isobbox_${SHORT}_cycv2T${CYC_T}_c$1$(rt $2)_T1_seed0_phase2"; }
 tag() { echo "isobbox_${LONG}_cycv2${TAGX}T${CYC_T}_c$1$(rt $2)_T1_seed0"; }

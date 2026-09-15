@@ -1,6 +1,6 @@
 #!/bin/bash
 # detach-FEATURES + feature-distance ONLY (Tal, 2026-08-31): --feat_detach_features together with
-# --relational_weight 0, so the ONLY objective is featD and the ONLY gradient route is the soft-map
+# --rkd_spatial_dist_weight 0, so the ONLY objective is featD and the ONLY gradient route is the soft-map
 # weights. Companion to run_stride14_featrkd_soft_DETACHFEAT.sh, which is the same detach ON TOP of
 # the existing spatial loss (that one collapsed: AUC 24.2/26.5/17.7, drift -0.335).
 set -e
@@ -19,8 +19,8 @@ echo "===== [train] detach FEATURES + featD ONLY ====="
     --fine_seg_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_fine_segments.pth \
     --pix_dino_features_path ./$PIX \
     --width 2304 --n_classes 2304 --geodesic --mu_3d_scale 1 --temperature 0.01 --train_seed 0 \
-    --relational_weight 0 \
-    --feat_student_mode soft --feat_dist_weight 1.0 --feat_angle_weight 0.0 \
+    --rkd_spatial_dist_weight 0 \
+    --feat_student_mode soft --rkd_feat_dist_weight 1.0 --rkd_feat_angle3_weight 0.0 \
     --feat_detach_features \
     --geo_table_2d_path ./experiments/guitar/geodesic_tables/guitar_01_click_270_370_sam_mask_2_geo_table_2d_seed0.pth \
     --out_dir $OUT ) > $L/featrkd_soft_${TAG}.log 2>&1

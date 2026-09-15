@@ -61,7 +61,7 @@ for C in "$@"; do
       --object_mask_path "$MASK" --fine_seg_path "$FINE" \
       --pix_dino_features_path "$PIX_sdsquare_fuse16" \
       --width 2304 --n_classes 2304 --geodesic --mu_3d_scale "$MU" --temperature 1.0 --train_seed 0 \
-      --geo_diag_2d 1175.75 --relational_weight "$REL_W" \
+      --geo_diag_2d 1175.75 --rkd_spatial_dist_weight "$REL_W" \
       --geo_table_3d_path "$GEO3D" --geo_table_2d_path "$GEO2D" \
       --anchor_weight "$ANCHOR_W" --anchor_temperature "$ANCHOR_T" \
       --cyc_weight "$C" --cyc_v2 --cyc_temperature "$CYC_T" $ALLPIX_FLAG \

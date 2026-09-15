@@ -20,7 +20,7 @@ echo "===== [train] detach FEATURES, beta=0.5 ====="
     --fine_seg_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_fine_segments.pth \
     --pix_dino_features_path ./$PIX \
     --width 2304 --n_classes 2304 --geodesic --mu_3d_scale 1 --temperature 0.01 --train_seed 0 \
-    --feat_student_mode soft --feat_dist_weight 0.5 --feat_angle_weight 0.0 \
+    --feat_student_mode soft --rkd_feat_dist_weight 0.5 --rkd_feat_angle3_weight 0.0 \
     --feat_detach_features \
     --geo_table_2d_path ./experiments/guitar/geodesic_tables/guitar_01_click_270_370_sam_mask_2_geo_table_2d_seed0.pth \
     --out_dir $OUT ) > $L/featrkd_soft_${TAG}.log 2>&1

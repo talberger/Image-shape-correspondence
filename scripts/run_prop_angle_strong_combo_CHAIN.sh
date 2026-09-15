@@ -14,8 +14,8 @@ CYC_W=1.676e-05            # 1/5 of L_spatial grad, unchanged
 
 echo "===== 1/4 stronger spatial angle ====="
 ./scripts/run_isobbox_prop_QUEUE.sh \
-  "sangle2.65e-2|--spatial_angle_weight 2.6494e-02|+ spatial angle (Euclidean), w=2.65e-2 (3x of 1/1)" \
-  "sangle8.83e-2|--spatial_angle_weight 8.8313e-02|+ spatial angle (Euclidean), w=8.83e-2 (10x of 1/1)"
+  "sangle3_w2.65e-2|--rkd_spatial_angle3_weight 2.6494e-02|+ rkd_spatial_angle3 (Euclidean), w=2.65e-2 (3x of 1/1)" \
+  "sangle3_w8.83e-2|--rkd_spatial_angle3_weight 8.8313e-02|+ rkd_spatial_angle3 (Euclidean), w=8.83e-2 (10x of 1/1)"
 
 echo "===== 2/4 L_dist calibration at MAIN step 25 (anchor lambda $ANCHOR_W) ====="
 CK=experiments/guitar/encoder_isobbox_sdsquare_fuse16_truediag2d_mu_learn_perseg_T1_seed0_phase2/encoder_checkpoint_step25.pth
@@ -59,11 +59,11 @@ set4() {  # <out_subdir> <title> then 4 x (<run tag suffix, "" = MAIN> <label>)
   for i in "${!R[@]}"; do EV+=("$EVALDIR/eval_${T}${R[$i]}_T1_seed0_v2.pth"); EL+=("${L[$i]}"); done
   python analysis/compare_eval_runs.py --runs "${EV[@]}" --labels "${EL[@]}" --save_path "$OUT/5_eval_v2.png"
 }
-set4 comparison_sangle_strong "spatial angle, stronger weights (Euclidean angles) on MAIN" \
+set4 comparison_sangle3_strong "rkd_spatial_angle3, stronger weights (Euclidean angles) on MAIN" \
   "" "MAIN baseline (mu_learn_perseg)" \
-  "_sangle8.83e-3" "+ angle w=8.83e-3 (1/1)" \
-  "_sangle2.65e-2" "+ angle w=2.65e-2 (3x)" \
-  "_sangle8.83e-2" "+ angle w=8.83e-2 (10x)"
+  "_sangle3_w8.83e-3" "+ rkd_spatial_angle3 w=8.83e-3 (1/1)" \
+  "_sangle3_w2.65e-2" "+ rkd_spatial_angle3 w=2.65e-2 (3x)" \
+  "_sangle3_w8.83e-2" "+ rkd_spatial_angle3 w=8.83e-2 (10x)"
 set4 comparison_combo_new_main "anchor / cycle / L_dist on the NEW main" \
   "" "MAIN baseline (mu_learn_perseg)" \
   "_cycv2T0.05_c1.676e-05_retstride5" "+ cycle only" \
