@@ -61,6 +61,7 @@ from modules.cycle_consistency_loss_v2 import cycle_consistency_loss_v2, cycle_c
 from modules.vertex_balance_loss import vertex_balance_loss
 from modules.anchor_loss import anchor_loss
 from modules.dist_loss import dist_loss
+from modules.lora import apply_lora_w, lora_state, merged_state_dict
 from modules.mapping_loss import (feature_drift, sample_center_pixels,
                                   sample_grid_center_pixels, soft_map_to_vertices)
 from modules.feature_rkd_loss import (rkd_feat_angle3_loss, rkd_feat_dist_loss,
@@ -90,6 +91,88 @@ def index_pixel_features(all_features, coords):
     """
     features = all_features[coords[:, 0], coords[:, 1]].detach().to(device)
     return F.normalize(features.float(), dim=-1)
+
+
+def aniso_mu_scale(mu_aniso, coords, neighbor_coords, center_groups):
+    """DIRECTIONAL per-segment mu (--mu_scope segment_aniso, Tal 2026-09-21).
+
+    Each segment g holds 3 numbers (a, b, c) -> L_g = [[e^a, 0], [c, e^b]], M_g = L_g L_g^T (always
+    SPD: an ellipse). A pair's scale is s = sqrt(u^T M u) = |L^T u|, u = the unit IMAGE offset
+    centre -> neighbour in (row, col). So s still divides the 3D side exactly like the isotropic mu;
+    only WHICH value it takes depends on the pair's direction in the image. The direction is taken
+    from the image because it is fixed data (the 3D direction would depend on the prediction itself).
+    u and -u give the same s. a = b = log s0, c = 0 is a circle: s = s0 in every direction.
+
+    mu_aniso [G, 3], coords [n, 2] (CPU), neighbor_coords [n, k, 2] (CPU), center_groups [n].
+    Returns s [n, k] on mu_aniso's device.
+    """
+    return aniso_scale_from_params(mu_aniso[center_groups.to(mu_aniso.device).long()], coords, neighbor_coords)
+
+
+def hybrid_aniso_mu_scale(mu_aniso, coords, neighbor_coords, center_groups, neighbor_groups):
+    """--mu_scope segment_aniso_xglobal (Tal, 2026-09-27): an IN-segment pair uses its segment's ellipse
+    (the part's proportions, as segment_aniso); a CROSS-segment pair uses ONE shared global ellipse, the
+    LAST row of mu_aniso (placement, as global_aniso -- out-of-segment pairs are what separate the two
+    front legs). neighbor_groups [n, k] = each neighbour's fine segment. Returns s [n, k]."""
+    s_seg = aniso_mu_scale(mu_aniso[:-1], coords, neighbor_coords, center_groups)
+    p_glob = mu_aniso[-1:].expand(coords.shape[0], 3)
+    s_glob = aniso_scale_from_params(p_glob, coords, neighbor_coords)
+    same = center_groups.to(s_seg.device).long().unsqueeze(1) == neighbor_groups.to(s_seg.device).long()
+    return torch.where(same, s_seg, s_glob)
+
+
+def switch_aniso_mu_scale(mu_aniso, coords, neighbor_coords, center_groups, global_phase):
+    """--mu_scope global_then_segment_aniso (Tal, 2026-09-27): a two-stage schedule inside ONE run.
+    Stage A (step < --mu_switch_step, global_phase=True): every pair uses ONE global ellipse = the LAST row of
+    mu_aniso, and neighbours are drawn in+out of segment -- the cross-segment pairs fix left/right placement.
+    Stage B: every pair uses its CENTRE's segment ellipse (rows 0..S-1), neighbours in-segment only (--switch_nin/_nout)
+    -- the per-segment proportions. At the switch the segment rows are initialised from the global row."""
+    if global_phase:
+        return aniso_scale_from_params(mu_aniso[-1:].expand(coords.shape[0], 3), coords, neighbor_coords)
+    return aniso_mu_scale(mu_aniso[:-1], coords, neighbor_coords, center_groups)
+
+
+def grid_center_params(mu_grid, coords, bbox, grid):
+    """--mu_scope grid_aniso: the (a, b, c) field lives on a grid x grid lattice of NODES spanning the
+    mask's bounding box; each centre gets the BILINEAR interpolation of its 4 surrounding nodes, so the
+    ellipse varies smoothly across the image instead of jumping at segment borders.
+    mu_grid [grid*grid, 3] (row-major nodes), coords [n, 2] (row, col), bbox (rmin, rmax, cmin, cmax)."""
+    rmin, rmax, cmin, cmax = bbox
+    c = coords.float().to(mu_grid.device)
+    fr = ((c[:, 0] - rmin) / max(rmax - rmin, 1) * (grid - 1)).clamp(0, grid - 1)
+    fc = ((c[:, 1] - cmin) / max(cmax - cmin, 1) * (grid - 1)).clamp(0, grid - 1)
+    r0 = fr.floor().long().clamp(max=grid - 2); c0 = fc.floor().long().clamp(max=grid - 2)
+    wr = (fr - r0.float()).unsqueeze(1); wc = (fc - c0.float()).unsqueeze(1)
+    node = lambda r, cc: mu_grid[r * grid + cc]
+    return ((1 - wr) * (1 - wc) * node(r0, c0) + (1 - wr) * wc * node(r0, c0 + 1)
+            + wr * (1 - wc) * node(r0 + 1, c0) + wr * wc * node(r0 + 1, c0 + 1))
+
+
+def aniso_scale_from_params(p, coords, neighbor_coords):
+    """s [n, k] = |L^T u| from per-CENTRE params p [n, 3] -- the shared core of both aniso scopes."""
+    dp = (neighbor_coords - coords.unsqueeze(1)).float().to(p.device)             # [n, k, 2]
+    norm = dp.norm(dim=-1, keepdim=True)
+    # a neighbour identical to its centre has no direction (and d_2D = 0): give it the row axis;
+    # any unit vector keeps s finite and > 0, and such a pair's residual does not depend on s anyway
+    u = torch.where(norm > 0, dp / norm.clamp_min(1e-12), torch.tensor([1.0, 0.0], device=dp.device))
+    ea, eb, c = p[:, 0].exp().unsqueeze(1), p[:, 1].exp().unsqueeze(1), p[:, 2].unsqueeze(1)
+    x = ea * u[..., 0] + c * u[..., 1]                                           # (L^T u)_0
+    y = eb * u[..., 1]                                                           # (L^T u)_1
+    return torch.sqrt(x * x + y * y)
+
+
+def aniso_axes(mu_aniso):
+    """Per segment: principal scales (sqrt of M's eigenvalues, major >= minor) and the major axis's
+    image angle in degrees (0 = along rows / vertical, 90 = along columns / horizontal)."""
+    with torch.no_grad():
+        a, b, c = mu_aniso[:, 0].exp(), mu_aniso[:, 1].exp(), mu_aniso[:, 2]
+        L = torch.zeros(mu_aniso.shape[0], 2, 2, device=mu_aniso.device)
+        L[:, 0, 0], L[:, 1, 0], L[:, 1, 1] = a, c, b
+        M = L @ L.transpose(1, 2)
+        evals, evecs = torch.linalg.eigh(M)                                      # ascending
+        minor, major = evals[:, 0].sqrt(), evals[:, 1].sqrt()
+        ang = torch.rad2deg(torch.atan2(evecs[:, 1, 1], evecs[:, 0, 1])) % 180.0
+    return major, minor, ang
 
 
 def measure_mu_3D_reference(encoder, vertices, coords, segment_ids, seg_idx, all_pixel_features,
@@ -496,6 +579,15 @@ def train(args):
                   % (geo_diag_2d, args.geo_diag_2d,
                      100 * (args.geo_diag_2d - geo_diag_2d) / geo_diag_2d))
             geo_diag_2d = args.geo_diag_2d
+        if args.geo_diag_3d is not None:
+            # VISIBLE-PART normalizer (Tal, 2026-09-16, bear proportions): the table's diagonal is the WHOLE
+            # mesh's diameter, which assumes the photo spans the whole object. For a partial view, pass the
+            # geodesic diameter of the visible part (analysis/estimate_visible_geo_diameter.py). Fixed, never
+            # refitted -- so unlike a fitted mu it keeps real zoom pressure on the features.
+            print('  geo_diag_3d OVERRIDE: %.5f -> %.5f (%+.2f%%)'
+                  % (geo_diag_3d, args.geo_diag_3d,
+                     100 * (args.geo_diag_3d - geo_diag_3d) / geo_diag_3d))
+            geo_diag_3d = args.geo_diag_3d
 
         # seg_idx must never be able to hand out one of the disconnected speck pixels as a
         # neighbour -- caught by a real smoke-test failure, not anticipated: the specks turned
@@ -519,6 +611,26 @@ def train(args):
         seg_idx = build_segment_index(fine_segments_geodesic_safe, geodesic_safe_mask)
     else:
         seg_idx = build_segment_index(fine_segments, coarse_mask)
+
+    # build_segment_index now TOLERATES a segment with zero pixels (see its own comment: the
+    # --geodesic copy above can empty out a segment that lies entirely outside the mask's largest
+    # connected component). Tolerating it is only correct while no CENTER carries such a segment
+    # id -- if one did, sample_in_segment_neighbors would compute
+    # `(rand * 0).long().clamp(max=-1)` = -1 and silently draw the segment's last padding slot
+    # instead of raising. That case has never been observed (geodesic_safe_mask is a subset of the
+    # LCC that centers are drawn from), so fail loudly rather than train on garbage neighbours.
+    center_segids = torch.unique(segment_ids)
+    if args.resample_centers:
+        center_segids = torch.unique(torch.cat([center_segids, candidate_segment_ids]))
+    empty_centers = [int(s) for s in center_segids
+                     if int(seg_idx.segment_pixel_count[int(s)]) == 0]
+    if empty_centers:
+        raise ValueError(
+            f'center pixels belong to fine segment(s) {empty_centers} which have ZERO pixels in '
+            f'the segment index -- in-segment neighbour sampling would silently draw padding. '
+            f'This means geodesic_safe_mask dropped an entire segment that still owns centers; '
+            f'see build_segment_index in modules/relational_loss.py.')
+
     num_neighbors = args.num_neighbors_in_segment + args.num_neighbors_out_segment
 
     # Cycle-consistency needs a 2D geodesic table too, but is otherwise independent of
@@ -591,20 +703,29 @@ def train(args):
         on_mask_rc = (cyc_pixel_to_node >= 0).nonzero()
         coords_by_node = torch.empty((on_mask_rc.shape[0], 2), dtype=torch.long)
         coords_by_node[cyc_pixel_to_node[on_mask_rc[:, 0], on_mask_rc[:, 1]]] = on_mask_rc
-        cyc_all_pixel_features = F.normalize(
-            all_pixel_features[coords_by_node[:, 0], coords_by_node[:, 1]].float(), dim=-1).to(device)
-        cyc_center_to_all = (cyc_geo_table_2d.float() / max(cyc_geo_diag_2d, 1e-8)).to(device)
-        if cyc_center_to_all.shape[1] != cyc_all_pixel_features.shape[0]:
+        if cyc_geo_table_2d.shape[1] != coords_by_node.shape[0]:
             raise ValueError('2D table has %d columns but %d mask pixels were gathered'
-                             % (cyc_center_to_all.shape[1], cyc_all_pixel_features.shape[0]))
+                             % (cyc_geo_table_2d.shape[1], coords_by_node.shape[0]))
         # --cyc_return_stride (2026-09-13): return leg lands only on mask pixels on a regular
         # s-pixel grid (row % s == 0 and col % s == 0). Same table, column subset -- distances stay
         # exact. Cuts the [V x M] return softmax ~s^2 x, the cost that made all-pixel runs 15 min.
-        if args.cyc_return_stride > 1:
-            keep = ((coords_by_node[:, 0] % args.cyc_return_stride == 0)
-                    & (coords_by_node[:, 1] % args.cyc_return_stride == 0)).nonzero().squeeze(1)
-            cyc_all_pixel_features = cyc_all_pixel_features[keep.to(device)]
-            cyc_center_to_all = cyc_center_to_all[:, keep.to(device)]
+        #
+        # SLICE FIRST (2026-09-20): this used to build BOTH full-size tensors -- the [2048 x 336278]
+        # float32 distance table (2.75GB) and the [336278 x 2304] gathered feature matrix (3.1GB) --
+        # normalize them, ship both to the GPU, and only THEN keep the stride-5 columns, which at
+        # LVIS scale are 13452 of 336278 = 4% of what was just built. Measured: 58s of the phase-2
+        # setup, and ~5.6GB of transient host+device memory, to produce ~230MB of tensors. Selecting
+        # `keep` up front and indexing before .float()/normalize/.to(device) is bit-identical --
+        # every op here is elementwise or per-row, so it commutes with taking a column subset -- and
+        # it is what makes phase-2 fit comfortably beside the rest of the per-instance pipeline.
+        keep = (slice(None) if args.cyc_return_stride <= 1 else
+                ((coords_by_node[:, 0] % args.cyc_return_stride == 0)
+                 & (coords_by_node[:, 1] % args.cyc_return_stride == 0)).nonzero().squeeze(1))
+        kept_coords = coords_by_node[keep]
+        cyc_all_pixel_features = F.normalize(
+            all_pixel_features[kept_coords[:, 0], kept_coords[:, 1]].float(), dim=-1).to(device)
+        cyc_center_to_all = (cyc_geo_table_2d[:, keep].float()
+                             / max(cyc_geo_diag_2d, 1e-8)).to(device)
         print('  cycle v2 return leg: %d mask pixels (%s), table [%d x %d] on GPU'
               % (cyc_all_pixel_features.shape[0],
                  'ALL, SHIC as written' if args.cyc_return_stride == 1 else
@@ -737,29 +858,115 @@ def train(args):
     # A pair's group is its CENTRE's segment (the simple choice; an out-of-segment pair therefore
     # belongs to the centre's segment, not the neighbour's).
     mu_log_scale = None
+    mu_aniso = None
     mu_groups = None
     mu_n_groups = None
     mu_seg_map = None
     if args.mu_mode != 'fixed':
         if not args.geodesic:
             raise SystemExit('--mu_mode %s is only implemented for the geodesic loss' % args.mu_mode)
-        if args.mu_scope == 'segment':
+        if args.mu_scope in ('segment_aniso', 'grid_aniso', 'global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso'):
+            if args.mu_mode != 'learned':
+                raise SystemExit('--mu_scope %s is implemented for --mu_mode learned only' % args.mu_scope)
+            # global_aniso: ONE ellipse, so an out-of-segment pair has no ambiguity -- allowed (Tal, 2026-09-27)
+            if args.num_neighbors_out_segment > 0 and args.mu_scope not in ('global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso'):
+                raise SystemExit('--mu_scope segment_aniso: out-of-segment pairs have no single segment '
+                                 'ellipse (the isotropic path uses a geometric mean) -- not defined yet; '
+                                 'use --num_neighbors_out_segment 0')
+        if args.mu_scope in ('segment', 'segment_aniso'):
             seg_vals = torch.unique(segment_ids)
             mu_n_groups = int(max(seg_vals.max().item(), int(fine_segments.max())) ) + 1
             mu_groups = segment_ids.to(device).long()          # [n], broadcast over the k pairs
             # the fine-segment map, so each NEIGHBOUR pixel's segment is available per step
             # (fixes 1 and 2: fit from in-segment pairs, geometric mean across segments)
             mu_seg_map = torch.as_tensor(fine_segments, device=device).long()
+        elif args.mu_scope == 'global_then_segment_aniso':
+            # same layout as the hybrid: rows 0..S-1 per fine segment, the LAST row = the stage-A global ellipse
+            if args.mu_switch_step is None or args.fixed_neighbors:
+                raise SystemExit('--mu_scope global_then_segment_aniso needs --mu_switch_step (and no --fixed_neighbors)')
+            if args.switch_nin + args.switch_nout != args.num_neighbors_in_segment + args.num_neighbors_out_segment:
+                raise SystemExit('--switch_nin + --switch_nout must equal the stage-A neighbour count (tensor shapes)')
+            seg_vals = torch.unique(segment_ids)
+            mu_n_groups = int(max(seg_vals.max().item(), int(fine_segments.max()))) + 1 + 1
+            mu_groups = segment_ids.to(device).long()
+            mu_seg_map = torch.as_tensor(fine_segments, device=device).long()
+        elif args.mu_scope == 'segment_aniso_xglobal':
+            # one ellipse per fine segment (rows 0..S-1, indexed by segment id) + ONE global ellipse
+            # (the last row) for cross-segment pairs -- see hybrid_aniso_mu_scale
+            seg_vals = torch.unique(segment_ids)
+            mu_n_groups = int(max(seg_vals.max().item(), int(fine_segments.max()))) + 1 + 1
+            mu_groups = segment_ids.to(device).long()
+            mu_seg_map = torch.as_tensor(fine_segments, device=device).long()
+        elif args.mu_scope == 'global_aniso':
+            # ONE ellipse for the whole object (Tal, 2026-09-21); neighbour sampling is untouched
+            # (still in-segment) -- only mu stops being per segment
+            mu_n_groups = 1
+            mu_groups = torch.zeros_like(segment_ids).to(device).long()
+        elif args.mu_scope == 'grid_aniso':
+            mu_n_groups = args.mu_grid * args.mu_grid      # one (a, b, c) per lattice NODE
+            mu_groups = None
+            _r, _c = coarse_mask.nonzero()
+            mu_grid_bbox = (float(_r.min()), float(_r.max()), float(_c.min()), float(_c.max()))
         else:
             mu_n_groups = 1
             mu_groups = None
-        if args.mu_mode == 'learned':
+        if args.mu_mode == 'learned' and args.mu_scope in ('segment_aniso', 'grid_aniso', 'global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso'):
+            # [G, 3] = (a, b, c); a = b = log s0, c = 0 -> a circle of radius s0 (s0 = 1, or --mu_init_path)
+            init = torch.ones(mu_n_groups)
+            if args.mu_init_path is not None:
+                init = torch.load(args.mu_init_path, map_location='cpu')['mu_scale'].float()
+                if init.numel() != mu_n_groups:
+                    raise SystemExit('--mu_init_path has %d scales, run has %d groups' % (init.numel(), mu_n_groups))
+            mu_aniso = torch.zeros(mu_n_groups, 3)
+            mu_aniso[:, 0] = mu_aniso[:, 1] = init.clamp_min(1e-6).log()
+            if args.mu_aniso_fixed_path is not None and args.mu_scope == 'segment_aniso_xglobal':
+                # HAND-MADE per-seg ellipses + a hand-made global (cross-seg) row, ALL frozen from step 0 (Tal, 2026-09-28)
+                fixed = torch.load(args.mu_aniso_fixed_path, map_location='cpu')['mu_aniso'].float()
+                if fixed.shape[0] != mu_n_groups:
+                    raise SystemExit('--mu_aniso_fixed_path has %d rows, run has %d (segments + 1 global)' % (fixed.shape[0], mu_n_groups))
+                mu_aniso = fixed.clone()
+                print('  mu_aniso LOADED + FROZEN (all rows) from %s' % args.mu_aniso_fixed_path)
+            if args.stageA_fixed:
+                # two-stage, HAND-MADE from step 0 (Tal, 2026-09-29): stage A reads the manual GLOBAL row, stage B (hybrid)
+                # the manual segment rows + the same global row; all rows frozen for the whole run
+                if not (args.mu_scope == 'global_then_segment_aniso' and args.switch_hybrid and args.mu_aniso_fixed_path is not None):
+                    raise SystemExit('--stageA_fixed needs global_then_segment_aniso + --switch_hybrid + --mu_aniso_fixed_path')
+                fixed = torch.load(args.mu_aniso_fixed_path, map_location='cpu')['mu_aniso'].float()
+                if fixed.shape[0] != mu_n_groups:
+                    raise SystemExit('--mu_aniso_fixed_path has %d rows, run has %d (segments + 1 global)' % (fixed.shape[0], mu_n_groups))
+                mu_aniso = fixed.clone()
+                print('  stage A: mu_aniso LOADED + FROZEN (all rows) from %s, global row %s'
+                      % (args.mu_aniso_fixed_path, [round(x, 3) for x in fixed[-1].tolist()]))
+            if args.stageA_fixed_circle is not None:
+                # stage A global = a FROZEN circle of this mu (Tal, 2026-09-29); stage B per-seg rows start from it and LEARN
+                if args.mu_scope != 'global_then_segment_aniso':
+                    raise SystemExit('--stageA_fixed_circle needs --mu_scope global_then_segment_aniso')
+                mu_aniso[-1, 0] = mu_aniso[-1, 1] = float(torch.tensor(args.stageA_fixed_circle).log()); mu_aniso[-1, 2] = 0.0
+                print('  stage A: global ellipse FROZEN to circle %g' % args.stageA_fixed_circle)
+            mu_aniso = mu_aniso.to(device).requires_grad_(True)
+            if (args.mu_aniso_fixed_path is not None and args.mu_scope == 'segment_aniso_xglobal') or args.stageA_fixed:
+                mu_aniso.register_hook(lambda g: torch.zeros_like(g))
+            if args.stageA_fixed_circle is not None:
+                _gmask = torch.ones_like(mu_aniso); _gmask[-1] = 0          # the global row never updates (zero grad, zero Adam moments)
+                mu_aniso.register_hook(lambda g: g * _gmask)
+        elif args.mu_mode == 'learned':
             mu_log_scale = torch.zeros(mu_n_groups, device=device, requires_grad=True)
+            if args.mu_init_path is not None:
+                # per-group scales precomputed from a frozen reference mapping (analysis/perseg_mu_from_zs.py,
+                # Tal 2026-09-16). With --mu_lr 0 they stay FIXED for the whole run.
+                init = torch.load(args.mu_init_path, map_location='cpu')['mu_scale'].float()
+                if init.numel() != mu_n_groups:
+                    raise SystemExit('--mu_init_path has %d scales, run has %d groups' % (init.numel(), mu_n_groups))
+                with torch.no_grad():
+                    mu_log_scale.copy_(init.clamp_min(1e-6).log().to(device))
+                print('  mu_3d_scale INIT from %s: %s (mu_lr %g)'
+                      % (args.mu_init_path, [round(x, 3) for x in init.tolist()], args.mu_lr))
         print('  mu_3d_scale: %s, scope %s%s -- the zoom between norm_d_2D and norm_d_3D is %s'
               % (args.mu_mode, args.mu_scope,
                  '' if mu_n_groups == 1 else ' (%d segments)' % mu_n_groups,
                  'refit in closed form every step' if args.mu_mode == 'optimal'
-                 else 'an Adam-trained parameter (init 1.0)'))
+                 else 'a DIRECTIONAL 2x2 SPD metric per segment (3 Adam-trained params, init = a circle)'
+                 if mu_aniso is not None else 'an Adam-trained parameter (init 1.0)'))
     else:
         print('  mu_3d_scale: %g%s' % (args.mu_3d_scale, ' (no-op)' if args.mu_3d_scale == 1.0 else ''))
     if args.balance_weight > 0.0:
@@ -768,11 +975,25 @@ def train(args):
               'candidates -- see modules/vertex_balance_loss.py'
               % (args.balance_weight, num_centers, args.k_vertices_per_pixel))
 
-    optimizer = torch.optim.Adam(encoder.parameters(), args.lr, eps=args.adam_eps)
+    if args.lora_w_rank > 0:
+        # LORA-W (2026-09-17, Tal): freeze the whole phase-1 encoder, train only a rank-r update B A on
+        # the chosen Linear layers (modules/lora.py). B starts at 0, so step 0 == phase-1 exactly.
+        wrapped = apply_lora_w(encoder, args.lora_w_rank, args.lora_w_layers)
+        trainable = [p for p in encoder.parameters() if p.requires_grad]
+        with torch.no_grad():
+            d0 = feature_drift(encoder(vertices), phase1_features)
+        print('  LORA-W: rank %d on mlp layers %s (%s), %d trainable params, lr %g, step-0 drift %.6f'
+              % (args.lora_w_rank, wrapped, args.lora_w_layers, sum(p.numel() for p in trainable),
+                 args.lora_w_lr, d0))
+        optimizer = torch.optim.Adam(trainable, args.lora_w_lr, eps=args.adam_eps)
+    else:
+        optimizer = torch.optim.Adam(encoder.parameters(), args.lr, eps=args.adam_eps)
     if mu_log_scale is not None:
         # its own param group: the scale is one number (or 17), not a feature map, and it has to be
         # free to move much faster than the encoder or it will not arrive inside 300 steps
         optimizer.add_param_group({'params': [mu_log_scale], 'lr': args.mu_lr})
+    if mu_aniso is not None:
+        optimizer.add_param_group({'params': [mu_aniso], 'lr': 0.0 if args.stageA_fixed else args.mu_lr})
     os.makedirs(args.out_dir, exist_ok=True)
 
     losses = []
@@ -801,13 +1022,52 @@ def train(args):
         elif args.geodesic:
             geo_table_2d_center_rows = geo_table_2d
 
+        switch_global = (args.mu_scope == 'global_then_segment_aniso' and step < args.mu_switch_step)
+        if args.mu_scope == 'global_then_segment_aniso' and step == args.mu_switch_step:
+            with torch.no_grad():
+                mu_aniso[:-1] = mu_aniso[-1]          # stage B starts every segment at the global ellipse
+                if args.mu_aniso_fixed_path is not None:
+                    # HAND-MADE ellipses (Tal, 2026-09-28; analysis/make_manual_mu_aniso.py): stage B uses them FROZEN.
+                    # Their Adam moments are 0 (rows unused in stage A) and the hook zeroes their grads -> no update.
+                    fixed = torch.load(args.mu_aniso_fixed_path, map_location='cpu')['mu_aniso'].float()
+                    if args.switch_hybrid and fixed.shape[0] == mu_aniso.shape[0]:
+                        # stage B = HYBRID with hand-made per-seg rows AND a hand-made global (cross-seg) row, all frozen.
+                        # lr -> 0 too: the global row carries Adam moments from stage A and would keep drifting on zero grads.
+                        mu_aniso[:] = fixed.to(device)
+                        for _g in optimizer.param_groups:
+                            if any(_p is mu_aniso for _p in _g['params']): _g['lr'] = 0.0
+                        mu_aniso.register_hook(lambda g: torch.zeros_like(g))
+                        fixed = None
+                        print('  step %d: stage-B HYBRID ellipses (segments + global) LOADED + FROZEN from %s' % (step, args.mu_aniso_fixed_path))
+                if args.mu_aniso_fixed_path is not None and fixed is not None:
+                    if fixed.shape[0] != mu_aniso.shape[0] - 1:
+                        raise SystemExit('--mu_aniso_fixed_path has %d rows, run has %d segments' % (fixed.shape[0], mu_aniso.shape[0] - 1))
+                    mu_aniso[:-1] = fixed.to(device)
+                    _frz = torch.ones_like(mu_aniso); _frz[:-1] = 0
+                    mu_aniso.register_hook(lambda g: g * _frz)
+                    print('  step %d: stage-B ellipses LOADED + FROZEN from %s' % (step, args.mu_aniso_fixed_path))
+                if args.mu_fix_seg_circle:
+                    # ONE segment's ellipse fixed to a circle at the switch, the rest keep learning (Tal, 2026-09-29).
+                    # The row was unused in stage A -> zero Adam moments; the masked grad keeps it exactly fixed.
+                    _fixmask = torch.ones_like(mu_aniso)
+                    for _spec in args.mu_fix_seg_circle:
+                        _sg, _v = _spec.split(':'); _sg = int(_sg); _v = float(_v)
+                        mu_aniso[_sg] = torch.tensor([_v, _v, 1.0], device=mu_aniso.device).log() * torch.tensor([1.0, 1.0, 0.0], device=mu_aniso.device)
+                        _fixmask[_sg] = 0
+                        print('  step %d: seg %d ellipse FIXED to circle %g (rest learned)' % (step, _sg, _v))
+                    mu_aniso.register_hook(lambda g: g * _fixmask)
+            print('  step %d: SWITCH global -> per-segment ellipses (init = global %s), neighbours %d in + %d out'
+                  % (step, [round(x, 3) for x in mu_aniso[-1].tolist()], args.switch_nin, args.switch_nout))
+        n_in, n_out = ((args.switch_nin, args.switch_nout)
+                       if args.mu_scope == 'global_then_segment_aniso' and not switch_global
+                       else (args.num_neighbors_in_segment, args.num_neighbors_out_segment))
         if args.fixed_neighbors:
             neighbor_coords = fixed_neighbor_coords
         else:
             neighbor_coords_in = sample_in_segment_neighbors(
-                coords, segment_ids, seg_idx, k=args.num_neighbors_in_segment)
+                coords, segment_ids, seg_idx, k=n_in)
             neighbor_coords_out = sample_out_segment_neighbors(
-                coords, segment_ids, seg_idx, k=args.num_neighbors_out_segment,
+                coords, segment_ids, seg_idx, k=n_out,
                 max_retries=args.out_segment_max_retries)
             neighbor_coords = torch.cat([neighbor_coords_in, neighbor_coords_out], dim=1)
 
@@ -843,7 +1103,22 @@ def train(args):
                 neighbor_coords, geo_table_3d, geo_table_2d_center_rows, pixel_to_node,
                 mu_3D_reference=mu_3D_reference, mu_2D_reference=mu_2D_reference,
                 mu_3d_scale=(args.mu_3d_scale if args.mu_mode == 'fixed' else
-                             'optimal' if args.mu_mode == 'optimal' else mu_log_scale.exp()),
+                             'optimal' if args.mu_mode == 'optimal' else
+                             aniso_scale_from_params(grid_center_params(mu_aniso, coords, mu_grid_bbox,
+                                                                        args.mu_grid), coords, neighbor_coords)
+                             if args.mu_scope == 'grid_aniso' else
+                             hybrid_aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups,
+                                                   mu_seg_map[neighbor_coords[..., 0].to(device),
+                                                              neighbor_coords[..., 1].to(device)])
+                             if args.mu_scope == 'segment_aniso_xglobal' else
+                             hybrid_aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups,
+                                                   mu_seg_map[neighbor_coords[..., 0].to(device),
+                                                              neighbor_coords[..., 1].to(device)])
+                             if args.mu_scope == 'global_then_segment_aniso' and args.switch_hybrid and not switch_global else
+                             switch_aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups, switch_global)
+                             if args.mu_scope == 'global_then_segment_aniso' else
+                             aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups)
+                             if mu_aniso is not None else mu_log_scale.exp()),
                 mu_groups=mu_groups, mu_n_groups=mu_n_groups,
                 mu_neighbor_groups=(None if mu_seg_map is None else
                                     mu_seg_map[neighbor_coords[..., 0].to(device),
@@ -1154,6 +1429,12 @@ def train(args):
                 mu_str = ('  mu_s=%.4f' % s.item() if s.numel() == 1 else
                           '  mu_s[min/med/max]=%.3f/%.3f/%.3f' %
                           (s.min().item(), s.median().item(), s.max().item()))
+                if mu_aniso is not None:
+                    # s above is per PAIR here; the per-segment ellipse is the readable summary
+                    major, minor, _ = aniso_axes(mu_aniso)
+                    ratio = major / minor
+                    mu_str += ('  aniso major/minor[max]=%.3f (median %.3f)'
+                               % (ratio.max().item(), ratio.median().item()))
             sang_str = ('' if args.rkd_spatial_angle3_weight == 0.0 else
                         '  spatial_angle3=%.5f (raw) cos_gap=%.4f valid=%.3f' % (sang_raw, sang_gap, sang_valid))
             print('step %4d/%d  loss %.6f (mu_2D=%.3f mu_3D_live=%.5f, ref_2D=%s ref_3D=%s)%s%s%s%s%s%s%s  '
@@ -1162,11 +1443,14 @@ def train(args):
                      ref_2D_str, ref_3D_str, cyc_str, bal_str, feat_str, anc_str, dist_str, mu_str,
                      sang_str, drift))
 
-            torch.save({'encoder_state_dict': encoder.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'fourier_basis': get_fourier_basis(encoder),
-                        'step': step, 'loss': loss.item(), 'drift': drift},
-                       os.path.join(args.out_dir, 'encoder_checkpoint_step%d.pth' % step))
+            if not args.no_step_checkpoints:
+                torch.save({'encoder_state_dict': (merged_state_dict(encoder) if args.lora_w_rank > 0
+                                                   else encoder.state_dict()),
+                            'lora_state': lora_state(encoder) if args.lora_w_rank > 0 else None,
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'fourier_basis': get_fourier_basis(encoder),
+                            'step': step, 'loss': loss.item(), 'drift': drift},
+                           os.path.join(args.out_dir, 'encoder_checkpoint_step%d.pth' % step))
 
             if args.stop_at_drift is not None and drift < args.stop_at_drift:
                 print('drift %.4f fell below --stop_at_drift %.4f; stopping.'
@@ -1175,13 +1459,35 @@ def train(args):
 
     # Final artifacts, mirroring phase 1's / train_mapping_loss.py's layout so
     # the analysis scripts can consume this checkpoint exactly like theirs.
-    torch.save({'encoder_state_dict': encoder.state_dict(),
+    torch.save({'encoder_state_dict': (merged_state_dict(encoder) if args.lora_w_rank > 0
+                                               else encoder.state_dict()),
+                        'lora_state': lora_state(encoder) if args.lora_w_rank > 0 else None,
                 'optimizer_state_dict': optimizer.state_dict(),
                 'fourier_basis': get_fourier_basis(encoder),
                 'losses': losses, 'drifts': drifts},
                os.path.join(args.out_dir, 'encoder_checkpoint.pth'))
     with torch.no_grad():
         torch.save(encoder(vertices), os.path.join(args.out_dir, 'pred_f.pth'))
+    if mu_log_scale is not None:
+        # same {'mu_scale': [G]} format --mu_init_path reads, so a run's final mu can seed another
+        torch.save({'mu_scale': mu_log_scale.detach().exp().cpu(),
+                    'present_groups': torch.unique(segment_ids).cpu() if mu_n_groups > 1 else None},
+                   os.path.join(args.out_dir, 'mu_scale.pth'))
+    if mu_aniso is not None:
+        major, minor, ang = aniso_axes(mu_aniso)
+        torch.save({'mu_aniso': mu_aniso.detach().cpu(), 'major': major.cpu(), 'minor': minor.cpu(),
+                    'major_angle_deg': ang.cpu(),
+                    'present_groups': torch.unique(segment_ids).cpu(), 'scope': args.mu_scope,
+                    'grid': args.mu_grid if args.mu_scope == 'grid_aniso' else None,
+                    'grid_bbox': mu_grid_bbox if args.mu_scope == 'grid_aniso' else None},
+                   os.path.join(args.out_dir, 'mu_aniso.pth'))
+        print('mu_aniso per %s (major / minor / major-axis angle, 0 = vertical):'
+              % ('grid node' if args.mu_scope == 'grid_aniso' else 'segment'))
+        for g in (range(mu_n_groups) if args.mu_scope in ('grid_aniso', 'global_aniso')
+                  else torch.unique(segment_ids).tolist()
+                  + ([mu_n_groups - 1] if args.mu_scope in ('segment_aniso_xglobal', 'global_then_segment_aniso') else [])):
+            print('  seg %2d  %.3f / %.3f / %5.1f deg  (ratio %.3f)'
+                  % (g, major[g].item(), minor[g].item(), ang[g].item(), (major[g] / minor[g]).item()))
 
     save_loss_plot(losses, drifts, args.checkpoint_every,
                    os.path.join(args.out_dir, 'relational_loss.png'))
@@ -1440,6 +1746,10 @@ if __name__ == '__main__':
                         default='./experiments/guitar/geodesic_tables/guitar_geo_table_3d.pth',
                         help='--geodesic only: vertex-to-vertex geodesic table from '
                              'analysis/build_geodesic_tables.py')
+    parser.add_argument('--geo_diag_3d', type=float, default=None,
+                        help='override the 3D geodesic diameter used to normalize d_3D (default: the 3D '
+                             "table's stored whole-mesh diagonal). For a photo showing only part of the object, "
+                             'pass the visible-part diameter from analysis/estimate_visible_geo_diameter.py.')
     parser.add_argument('--geo_diag_2d', type=float, default=None,
                         help='override the 2D geodesic diameter used to normalize d_2D, instead of '
                              "taking the table's own stored `diagonal`. That stored value is a max "
@@ -1468,12 +1778,29 @@ if __name__ == '__main__':
                              "every step (s* = sum(b^2)/sum(a*b) over the sampled pairs, detached; "
                              "no parameter and no lr to tune). 'learned': an nn.Parameter trained "
                              'by Adam at --mu_lr, init 1.0. Geodesic loss only.')
-    parser.add_argument('--mu_scope', type=str, default='global', choices=['global', 'segment'],
+    parser.add_argument('--mu_scope', type=str, default='global', choices=['global', 'segment', 'segment_aniso', 'grid_aniso', 'global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso'],
                         help='--mu_mode optimal/learned: one scale for the whole object, or one '
                              'PER FINE SEGMENT. A pair belongs to its CENTRE pixel\'s segment. '
                              'Per-segment is the anisotropy test: a single scalar can only fix a '
                              'uniform zoom, and the 09-10 measurement says mu<1 compresses the '
                              'NECK specifically, i.e. the distortion is regional.')
+    parser.add_argument('--mu_switch_step', type=int, default=None,
+                        help='--mu_scope global_then_segment_aniso: first step of stage B (per-segment ellipses, in-segment pairs)')
+    parser.add_argument('--switch_nin', type=int, default=16, help='stage-B in-segment neighbours')
+    parser.add_argument('--switch_hybrid', action='store_true',
+                        help='global_then_segment_aniso: stage B is the HYBRID (in-seg pair -> its segment ellipse, cross-seg pair -> the global row); use with --switch_nout > 0 (Tal 2026-09-28)')
+    parser.add_argument('--mu_aniso_fixed_path', type=str, default=None,
+                        help='hand-made ellipses (Tal 2026-09-28), FROZEN: global_then_segment_aniso -> stage-B segment rows at the switch; segment_aniso_xglobal -> all rows (segments + global) from step 0')
+    parser.add_argument('--switch_nout', type=int, default=0, help='stage-B out-of-segment neighbours')
+    parser.add_argument('--mu_fix_seg_circle', nargs='+', default=None, metavar='SEG:VALUE',
+                        help='global_then_segment_aniso: at the switch, fix these segments to a circle of that mu and freeze them; other rows keep learning (Tal 2026-09-29)')
+    parser.add_argument('--stageA_fixed_circle', type=float, default=None,
+                        help='global_then_segment_aniso: stage-A global ellipse frozen to a circle of this mu; stage-B per-seg rows start from it and learn (Tal 2026-09-29)')
+    parser.add_argument('--stageA_fixed', action='store_true',
+                        help='global_then_segment_aniso + --switch_hybrid: the --mu_aniso_fixed_path file (segments + global row) is loaded and FROZEN from step 0, so stage A uses the manual global row (Tal 2026-09-29)')
+    parser.add_argument('--mu_grid', type=int, default=6,
+                        help='--mu_scope grid_aniso: the ellipse field is a mu_grid x mu_grid lattice of nodes '
+                             'over the mask bbox, bilinearly interpolated at each centre (2026-09-21)')
     parser.add_argument('--mu_fit_space', type=str, default='abs', choices=['abs', 'log'],
                         help="--mu_mode optimal: 'abs' (default) fits the scale on the ABSOLUTE "
                              'residual, which is what the loss itself measures -- a pair contributes '
@@ -1483,6 +1810,17 @@ if __name__ == '__main__':
                              'any length. Left OFF by default 2026-09-14: Tal wants the long '
                              'in-segment pairs to carry the scale, and unlike the in-segment / '
                              'geometric-mean fixes this one is a modelling choice, not a bug.')
+    parser.add_argument('--mu_init_path', type=str, default=None,
+                        help="--mu_mode learned only: .pth with 'mu_scale' [n_groups] to initialise the per-group "
+                             'scales (analysis/perseg_mu_from_zs.py). Combine with --mu_lr 0 to keep them fixed.')
+    parser.add_argument('--lora_w_rank', type=int, default=0,
+                        help='LORA-W (2026-09-17): >0 freezes the phase-1 encoder and trains only a rank-r '
+                             'update on --lora_w_layers (modules/lora.py). Checkpoints store the MERGED weights '
+                             '(W + BA) under encoder_state_dict plus the raw update under lora_state. 0 = off.')
+    parser.add_argument('--lora_w_layers', choices=['last', 'all'], default='last',
+                        help='LORA-W: wrap only the output Linear (feature change has rank <= r) or all Linears.')
+    parser.add_argument('--lora_w_lr', type=float, default=1e-3,
+                        help='LORA-W: Adam lr for the LoRA parameters (replaces --lr for the encoder).')
     parser.add_argument('--mu_lr', type=float, default=1e-2,
                         help='--mu_mode learned: lr for the scale parameter only (its own Adam '
                              'param group). Much larger than the encoder lr on purpose -- it is '
@@ -1595,6 +1933,13 @@ if __name__ == '__main__':
                              '--cyc_weight is parked at 0.0 as of this finding.')
 
     # Optimization -- same discipline as train_mapping_loss.py.
+    parser.add_argument('--no_step_checkpoints', action='store_true',
+                        help='skip the intermediate encoder_checkpoint_step<N>.pth dumps, writing '
+                             'only the final encoder_checkpoint.pth (2026-09-20). The step ladder '
+                             'exists for the step-progression figure during method development; a '
+                             'production sweep (e.g. the 132-instance DensePose-LVIS eval) never '
+                             'reads it and pays 13 x 144MB = 1.9GB of writes per instance for it. '
+                             'Affects only what is written to disk, never what is trained.')
     parser.add_argument('--num_iters', type=int, default=300)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--adam_eps', type=float, default=1e-12,

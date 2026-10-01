@@ -51,10 +51,11 @@ def main(args):
     knn_k1 = load(f'{a}/color_mesh_from_knn_k1/render/{mb}_mesh_color_position_k1_side_by_side.png')
     knn_k10 = load(f'{a}/color_mesh_from_knn_k10/render/{mb}_mesh_color_position_k10_side_by_side.png')
     knn_k100 = load(f'{a}/color_mesh_from_knn_k100/render/{mb}_mesh_color_position_k100_side_by_side.png')
-    soft = load(f'{a}/color_mesh_from_soft_mapping/render/{mb}_mesh_color_soft_snap_position_k10_side_by_side.png')
-    bp_k1 = load(f'{a}/back_projection/{mb}_backproj_{args.checker_stem}_k1_side_by_side.png')
-    bp_soft = load(f'{a}/back_projection/{mb}_backproj_{args.checker_stem}_soft_snap_k1_side_by_side.png')
-    hard_snap = load(f'{a}/color_mesh_from_soft_mapping/render/{mb}_hard_snap_spheres_pix_{pt}_side_by_side.png')
+    sd = args.soft_dir_name
+    soft = load(f'{a}/{sd}/render/{mb}_mesh_color_soft_snap_position_k10_side_by_side.png')
+    bp_k1 = load(args.bp_k1_path or f'{a}/back_projection/{mb}_backproj_{args.checker_stem}_k1_side_by_side.png')
+    bp_soft = load(args.bp_soft_path or f'{a}/back_projection/{mb}_backproj_{args.checker_stem}_soft_snap_k1_side_by_side.png')
+    hard_snap = load(f'{a}/{sd}/render/{mb}_hard_snap_spheres_pix_{pt}_side_by_side.png')
 
     source, knn_k1_r = split(knn_k1, args.knn_split_x)
     _, knn_k10_r = split(knn_k10, args.knn_split_x)
@@ -125,6 +126,11 @@ if __name__ == '__main__':
                               'side_by_side.png')
     parser.add_argument('--cell_size', type=int, default=320,
                          help='height each panel is scaled to before tiling')
+    # SHIC-bear layout (2026-09-17): soft mapping lives in analyze/soft_mapping, back-projections are
+    # named bear3_OURS_{top1,soft}_backproj_... Defaults keep the guitar layout unchanged.
+    parser.add_argument('--soft_dir_name', type=str, default='color_mesh_from_soft_mapping')
+    parser.add_argument('--bp_k1_path', type=str, default=None)
+    parser.add_argument('--bp_soft_path', type=str, default=None)
     parser.add_argument('--output_path', type=str, required=True)
     args = parser.parse_args()
     main(args)

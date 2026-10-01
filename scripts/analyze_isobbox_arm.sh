@@ -14,6 +14,8 @@ set -e
 source /workspace/activate_bsb.sh
 cd /workspace/bsb
 source scripts/lib_isobbox_common.sh
+[ -n "$OLDMESH" ] && source scripts/lib_oldmesh_override.sh
+[ -n "$NECKRINGS4" ] && source scripts/lib_neckrings4_override.sh
 
 DEMO_NAME=$1; PRED_F=$2; PIXFEAT=$3; EVAL_TAG=${4:-}
 [ -z "$PIXFEAT" ] && { echo "usage: $0 <demo_run_name> <pred_f_path> <pix_features_path> [eval_tag]"; exit 1; }
@@ -29,7 +31,10 @@ echo "arm: $DEMO_NAME"; echo "  pred_f : $PRED_F"; echo "  photo  : $PIXFEAT"
 CHECKER_VIEWS="${CHECKER%.pth}_rendered_views.png"
 if [ ! -f "$CHECKER_VIEWS" ]; then
   echo "=== [0/7] rendering the checker mesh views (one-off prerequisite) ==="
-  python analysis/render_colored_mesh.py --obj_path "$OBJ" \
+  # --render_res 512, not the 224 default (2026-09-16): the checker view is the reference panel the
+  # back-projection figures are read against, and at 224 its silhouette is visibly stair-stepped.
+  # demo/guitar/colored_mesh/'s original was made at 512; this call had been leaving it at 224.
+  python analysis/render_colored_mesh.py --obj_path "$OBJ" --render_res 512 \
     --ply_path "${CHECKER%.pth}.ply" --save_dir "$(dirname "$CHECKER")" --save_rendered_views_grid
 fi
 
@@ -41,9 +46,10 @@ if [ -n "$SMALL" ]; then
     --vertex_features_path "$PRED_F" --features_path "$PIXFEAT" --mask_path "$MASK" \
     --obj_path "$OBJ" --name "$NAME" --checker_path "$CHECKER" \
     --query_pixels $QUERY_PIXELS --query_vertices $QUERY_VERTICES --k_vertices_per_pixel 10 \
+    --temperature ${READ_T:-1} \
     ${EVAL_TAG:+--eval_pairs_path "$EVALPAIRS" --geo_table_path "$GEO3D" \
       --eval_save_path "$EVALDIR/eval_${EVAL_TAG}_v2.pth" --eval_plot_path "$EVALDIR/eval_${EVAL_TAG}_v2.png" \
-      --run_label "$EVAL_TAG (isobbox 3886v, eval v2)"}
+      --run_label "$EVAL_TAG (${MESH_LABEL:-isobbox 3886v}, eval v2)"}
   echo "===== ARM ANALYSIS DONE: $DEMO ====="
   exit 0
 fi
@@ -136,7 +142,7 @@ if [ -n "$EVAL_TAG" ]; then
   echo "=== [7/7] ground-truth eval, EVAL SET v2 (isobbox-only) ==="
   mkdir -p "$EVALDIR"
   python analysis/eval_geodesic_error.py --obj_path "$OBJ" --name "$NAME" \
-    --run_label "$EVAL_TAG (isobbox 3886v, eval v2)" \
+    --run_label "$EVAL_TAG (${MESH_LABEL:-isobbox 3886v}, eval v2)" \
     --geo_table_path "$GEO3D" --eval_pairs_path "$EVALPAIRS" \
     --features_path "$PIXFEAT" --vertex_features_path "$PRED_F" --k_vertices_per_pixel 10 \
     --save_path "$EVALDIR/eval_${EVAL_TAG}_v2.pth" --plot_path "$EVALDIR/eval_${EVAL_TAG}_v2.png"

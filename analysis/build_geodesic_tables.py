@@ -31,6 +31,7 @@ cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/build_ge
   --out_dir ./experiments/guitar/geodesic_tables
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -105,6 +106,155 @@ def build_3d_table(obj_path, name, t_coef, undershoot_tol):
     return torch.from_numpy(table), diagonal
 
 
+def default_num_workers():
+    """Workers to split the 2D Dijkstra over, from the CONTAINER's CPU quota -- not os.cpu_count().
+
+    Measured 2026-09-20 on the RunPod pod: os.cpu_count()/nproc both report the HOST's 48 cores,
+    but /sys/fs/cgroup/cpu.max says '510000 100000' = a 5.1-CPU quota for this container. Sizing the
+    pool off 48 oversubscribes the quota ~5x and the scheduler thrashes: 24 workers took 108.6s
+    where 10 took 72.0s and 5 took 78.0s on the same 2048-center table. So: read the quota, and ask
+    for modestly more processes than it (Dijkstra stalls on memory, so a little oversubscription
+    still helps), capped so this stays sane on a machine with no quota set at all.
+    """
+    n = os.cpu_count() or 1
+    try:
+        with open('/sys/fs/cgroup/cpu.max') as f:            # cgroup v2
+            quota, period = f.read().split()
+        if quota != 'max':
+            n = max(1, int(float(quota) / float(period)))
+    except (OSError, ValueError):
+        try:
+            with open('/sys/fs/cgroup/cpu/cpu.cfs_quota_us') as f:   # cgroup v1
+                quota = int(f.read())
+            with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us') as f:
+                period = int(f.read())
+            if quota > 0:
+                n = max(1, quota // period)
+        except (OSError, ValueError):
+            pass
+    return int(min(max(n * 2, 1), 16))
+
+
+# Set in the parent before the Pool is created, so `fork` gives every worker the graph and the
+# center list for free (copy-on-write) instead of pickling ~50MB of CSR arrays per worker.
+_WORKER_GRAPH = None
+_WORKER_CENTERS = None
+_WORKER_SHM_NAME = None
+_WORKER_SHAPE = None
+
+
+def _dijkstra_worker(bounds):
+    """One worker's slice of the center list: Dijkstra from centers [start, end), written straight
+    into the shared float32 output buffer. Returns (start, end, chunk_max, n_nonfinite) -- never the
+    distances themselves, so nothing large crosses the process boundary.
+
+    Bit-identical to the serial path by construction: scipy's Dijkstra from center i does not depend
+    on center j in any way, so slicing the source list changes nothing about any row's values. The
+    float64 -> float32 downcast happens per slice exactly as the serial chunk loop already did it.
+    """
+    from multiprocessing import shared_memory
+    start, end = bounds
+    shm = shared_memory.SharedMemory(name=_WORKER_SHM_NAME)
+    try:
+        table = np.ndarray(_WORKER_SHAPE, dtype=np.float32, buffer=shm.buf)
+        dist = scipy.sparse.csgraph.dijkstra(
+            _WORKER_GRAPH, indices=_WORKER_CENTERS[start:end], directed=False)
+        finite = np.isfinite(dist)
+        n_nonfinite = int((~finite).sum())
+        chunk_max = float(dist[finite].max()) if n_nonfinite < dist.size else 0.0
+        table[start:end] = dist
+        return start, end, chunk_max, n_nonfinite
+    finally:
+        shm.close()
+
+
+def _dijkstra_parallel(graph, center_nodes, num_mask_pixels, num_workers, chunk_size):
+    """Multi-process replacement for the serial chunked Dijkstra loop. Splits the center list over
+    `num_workers` processes (scipy's dijkstra is single-threaded regardless of how many sources it is
+    handed, so the serial version used one core of the machine's many). The output table is a single
+    shared-memory float32 buffer every worker writes a disjoint row range of -- no IPC of distance
+    data, and the same peak-memory property the serial chunking was introduced for: each worker only
+    holds its own slice's float64 result at a time.
+    """
+    global _WORKER_GRAPH, _WORKER_CENTERS, _WORKER_SHM_NAME, _WORKER_SHAPE
+    import multiprocessing
+    from multiprocessing import shared_memory
+
+    num_centers = len(center_nodes)
+    shape = (num_centers, num_mask_pixels)
+    nbytes = int(np.prod(shape)) * 4
+
+    # One slice per worker-sized piece, capped by chunk_size so a worker's transient float64 block
+    # stays bounded exactly as in the serial path.
+    per_worker = int(np.ceil(num_centers / num_workers))
+    step = min(per_worker, chunk_size)
+    bounds = [(s, min(s + step, num_centers)) for s in range(0, num_centers, step)]
+
+    shm = shared_memory.SharedMemory(create=True, size=nbytes)
+    try:
+        _WORKER_GRAPH, _WORKER_CENTERS = graph, center_nodes
+        _WORKER_SHM_NAME, _WORKER_SHAPE = shm.name, shape
+
+        diagonal = 0.0
+        t0 = time.time()
+        ctx = multiprocessing.get_context('fork')
+        with ctx.Pool(num_workers) as pool:
+            for done, (start, end, chunk_max, n_nonfinite) in enumerate(
+                    pool.imap_unordered(_dijkstra_worker, bounds), 1):
+                if n_nonfinite:
+                    raise ValueError(
+                        f'{n_nonfinite} (center, mask-pixel) pairs in centers [{start},{end}) are '
+                        f'unreachable even after restricting to the largest connected component -- '
+                        f'this should be impossible by construction (every pixel in that component '
+                        f'is reachable from every other), so something other than the known speck '
+                        f'issue is going on -- do not silently proceed with inf distances')
+                diagonal = max(diagonal, chunk_max)
+                print(f'  2D: {done}/{len(bounds)} center slices done '
+                      f'({time.time() - t0:.1f}s so far)')
+
+        table = np.array(np.ndarray(shape, dtype=np.float32, buffer=shm.buf))  # copy out of shm
+        print(f'2D: dijkstra from {num_centers} centers done in {time.time() - t0:.1f}s '
+              f'({num_workers} workers, {len(bounds)} slices of <={step} centers)')
+        return table, diagonal
+    finally:
+        _WORKER_GRAPH = _WORKER_CENTERS = _WORKER_SHM_NAME = _WORKER_SHAPE = None
+        shm.close()
+        shm.unlink()
+
+
+def true_geodesic_diameter(graph, mask_rows, mask_cols, max_sweeps=8):
+    """The TRUE 2D geodesic diameter over ALL pixel pairs, by the standard double sweep -- folded in
+    here (2026-09-20) from analysis/measure_2d_geodesic_diameter.py, which was a separate ~90s
+    process that rebuilt this exact graph from scratch only to run a handful of single-source
+    Dijkstras on it. Same algorithm, same graph, same starting node (0), so the number is identical
+    to what that script prints; it just stops paying for the rebuild.
+
+    Why the table's own `diagonal` is not this number: that one is the max over the 2048 SAMPLED
+    centers only, so it can only underestimate the true all-pairs diameter (see the standalone
+    script's docstring for the full argument -- an underestimated mu_2D inflates every norm_d_2D).
+    """
+    src, best, seen = 0, 0.0, set()
+    t0 = time.time()
+    for sweep in range(max_sweeps):
+        d = scipy.sparse.csgraph.dijkstra(graph, indices=src, directed=False)
+        d[~np.isfinite(d)] = -1
+        far = int(np.argmax(d))
+        far_d = float(d[far])
+        print(f'  diameter sweep {sweep + 1}: from ({mask_rows[src]},{mask_cols[src]}) -> farthest '
+              f'({mask_rows[far]},{mask_cols[far]}) at {far_d:.2f} px')
+        best = max(best, far_d)
+        if far in seen:
+            break
+        seen.add(src)
+        src = far
+    # Line format deliberately identical to measure_2d_geodesic_diameter.py's, down to the field
+    # positions: callers (scripts/run_lvis_instance.sh) awk '$(NF-1)' out of it, so any suffix here
+    # -- a timing, a unit -- silently hands them the wrong token. Timing goes on its own line.
+    print(f'TRUE 2D geodesic diameter (double sweep): {best:.6f} px')
+    print(f'  (double sweep took {time.time() - t0:.1f}s, {sweep + 1} sweeps)')
+    return best
+
+
 def largest_connected_component(mask):
     """The mask restricted to its largest 8-connected component, dropping any smaller
     disconnected specks (e.g. stray SAM-segmentation pixels). Factored out (2026-09-03) so it can
@@ -123,7 +273,7 @@ def largest_connected_component(mask):
     return labeled == largest_label, num_components
 
 
-def build_2d_table(coords, coarse_mask, chunk_size=2000):
+def build_2d_table(coords, coarse_mask, chunk_size=2000, num_workers=1, compute_true_diameter=False):
     """coords: int64 [n, 2] (row, col) of the fixed sample centers.
     coarse_mask: bool ndarray [H, W].
     Returns (table [n, H, W] float32, diagonal float, geodesic_safe_mask bool [H, W]).
@@ -223,7 +373,18 @@ def build_2d_table(coords, coarse_mask, chunk_size=2000):
     # chunk into a preallocated float32 array immediately, and discarding the float64 chunk --
     # peak transient memory becomes ~chunk_size*num_mask_pixels*8 bytes instead of
     # num_centers*num_mask_pixels*8 bytes, independent of how large num_centers gets.
+    # The all-pairs diameter runs on the graph while it is still in memory -- see
+    # true_geodesic_diameter's docstring for why this used to be a separate 90s process.
+    true_diameter = (true_geodesic_diameter(graph, mask_rows, mask_cols)
+                     if compute_true_diameter else None)
+
     num_centers = len(center_nodes)
+    if num_workers > 1:
+        table, diagonal = _dijkstra_parallel(
+            graph, center_nodes, num_mask_pixels, num_workers, chunk_size)
+        return (torch.from_numpy(table), diagonal, geodesic_safe_mask,
+                torch.from_numpy(pixel_to_node), true_diameter)
+
     table = np.empty((num_centers, num_mask_pixels), dtype=np.float32)
     diagonal = 0.0
     t0 = time.time()
@@ -251,7 +412,8 @@ def build_2d_table(coords, coarse_mask, chunk_size=2000):
     print(f'2D: dijkstra from {num_centers} centers done in {time.time() - t0:.1f}s '
           f'(chunk_size={chunk_size})')
 
-    return torch.from_numpy(table), diagonal, geodesic_safe_mask, torch.from_numpy(pixel_to_node)
+    return (torch.from_numpy(table), diagonal, geodesic_safe_mask,
+            torch.from_numpy(pixel_to_node), true_diameter)
 
 
 def main(args):
@@ -291,8 +453,9 @@ def main(args):
             coarse_mask, fine_segments, args.num_center_pixels, seed=args.seed)
         suffix = f'_seed{args.seed}'
 
-    table_2d, diag_2d, geodesic_safe_mask, pixel_to_node = build_2d_table(
-        coords, coarse_mask, chunk_size=args.chunk_size)
+    table_2d, diag_2d, geodesic_safe_mask, pixel_to_node, true_diameter_2d = build_2d_table(
+        coords, coarse_mask, chunk_size=args.chunk_size, num_workers=args.num_workers,
+        compute_true_diameter=args.true_diameter)
     path_2d = os.path.join(
         args.out_dir,
         f'{os.path.splitext(os.path.basename(args.object_mask_path))[0]}_geo_table_2d{suffix}.pth')
@@ -301,6 +464,10 @@ def main(args):
         # not expanded to dense [num_centers, H, W] -- see build_2d_table's docstring for why).
         # A caller looks up (center_i, row, col) as table[center_i, pixel_to_node[row, col]].
         'table': table_2d, 'pixel_to_node': pixel_to_node, 'diagonal': diag_2d, 'coords': coords,
+        # true_diameter_2d (--true_diameter, 2026-09-20): the all-pairs geodesic diameter, which
+        # 'diagonal' above can only underestimate (it is a max over the sampled centers alone).
+        # None unless asked for; this is what --geo_diag_2d should be fed downstream.
+        'true_diameter_2d': true_diameter_2d,
         # geodesic_safe_mask (largest connected component of object_mask_path, specks dropped --
         # see build_2d_table's docstring): geodesic training MUST use this, not the raw
         # coarse_mask, for sample_out_segment_neighbors's candidate pool, or a disconnected
@@ -314,6 +481,16 @@ def main(args):
         'grid_stride': args.grid_stride if args.center_mode == 'grid' else None,
     }, path_2d)
     print(f'saved 2D table {tuple(table_2d.shape)} (diagonal={diag_2d:.5f}) to {path_2d}')
+
+    # Sidecar (2026-09-20): the two scalars a downstream caller actually needs, without making it
+    # torch.load the 2.6GB table to read them (~33s at LVIS scale). scripts/run_lvis_worker.py reads
+    # geo_diag_2d from here to hand phase-2; the shell pipeline still awks it off stdout.
+    meta_path = os.path.splitext(path_2d)[0] + '_meta.json'
+    with open(meta_path, 'w') as f:
+        json.dump({'diagonal': diag_2d, 'true_diameter_2d': true_diameter_2d,
+                   'num_centers': int(table_2d.shape[0]), 'num_mask_pixels': int(table_2d.shape[1]),
+                   'table_path': path_2d}, f, indent=1)
+    print(f'saved sidecar {meta_path}')
 
 
 if __name__ == '__main__':
@@ -342,6 +519,19 @@ if __name__ == '__main__':
                         help='--center_mode grid only. Pixel spacing between candidate centers '
                              '(e.g. 3 -> ~1/9th of on-object pixels are eligible candidates). '
                              'Must match the training run\'s --center_grid_stride.')
+    parser.add_argument('--num_workers', type=int, default=default_num_workers(),
+                        help='processes to split the 2D Dijkstra over (2026-09-20). scipy\'s '
+                             'dijkstra is single-threaded no matter how many sources it is given, '
+                             'so the default 1 leaves this machine\'s other cores idle -- at the '
+                             'LVIS scale (2048 centers, 336k mask px) that is ~340s on one core. '
+                             'Results are bit-identical at any --num_workers: Dijkstra from center '
+                             'i does not depend on center j. 1 = the original serial code path.')
+    parser.add_argument('--true_diameter', action='store_true',
+                        help='also compute the TRUE all-pairs 2D geodesic diameter (double sweep) '
+                             'on the graph built here, and store it as true_diameter_2d. Folds in '
+                             'analysis/measure_2d_geodesic_diameter.py, which was a separate '
+                             'process rebuilding this same graph from scratch (~90s at LVIS '
+                             'scale). Same algorithm and same start node, so the same number.')
     parser.add_argument('--skip_3d', action='store_true',
                         help='skip rebuilding the 3D (vertex-to-vertex) table -- it does not '
                              'depend on --center_mode/pixel centers at all, so re-running it is '

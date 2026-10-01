@@ -258,6 +258,16 @@ def load_mesh_normalizer_spec(obj_path):
     Missing sidecar => the historical centroid-centred normalizer, unchanged. Recognized contents:
       {"center": "bbox"}      bounding-box centre (sampling-independent, see Normalizer)
       {"center": "centroid"}  the default, stated explicitly
+      {"center": "none"}      no transform at all -- the file is ALREADY in the intended frame
+
+    "none" exists for a mesh DERIVED from another one that must keep the parent's exact frame
+    (2026-09-16). meshes/guitar_neckrings4.obj adds 144 vertices to guitar.obj's neck and shares
+    its raw coordinates bit-for-bit; guitar.obj's own centroid normalizer happens to be the
+    IDENTITY (centroid [0,0,0], radius 1.0), so leaving the file untransformed reproduces the
+    parent frame exactly. Under the default normalizer it would NOT: the added vertices move the
+    centroid by 0.0046 and the radius by 0.46%, which was measured to change the argmax vertex of
+    12% of the mask's pixels and to drop phase-1 reuse from cos 1.000000 to 0.9986. Nothing about
+    the surface changed -- only where loadmesh decided to put the origin.
     """
     spec_path = os.path.splitext(obj_path)[0] + '.normalizer.json'
     if not os.path.exists(spec_path):
@@ -265,9 +275,31 @@ def load_mesh_normalizer_spec(obj_path):
     with open(spec_path) as fh:
         spec = json.load(fh)
     center = spec.get('center', 'centroid')
-    if center not in ('bbox', 'centroid'):
-        raise ValueError(f'{spec_path}: unknown "center" {center!r} (expected "bbox" or "centroid")')
+    if center not in ('bbox', 'centroid', 'none'):
+        raise ValueError(f'{spec_path}: unknown "center" {center!r} '
+                         f'(expected "bbox", "centroid" or "none")')
     return center
+
+
+def mesh_frame_normalizer(obj_path, raw_vertices):
+    """The Normalizer loadmesh() will apply to this mesh -- the single place that decides.
+
+    Added 2026-09-16. Callers outside loadmesh that need to put a point into a mesh's frame (a
+    hand-picked .pp coordinate, a scale for reporting errors) were each re-deriving the choice
+    with their own `if load_mesh_normalizer_spec(...) == 'bbox'` branch. Every such branch silently
+    fell through to the centroid normalizer for any sidecar mode it did not know about, which is
+    the exact failure this project has already hit three times. Route new callers through here.
+    """
+    center = load_mesh_normalizer_spec(obj_path)
+    if center == 'bbox':
+        return Normalizer.get_bounding_sphere_normalizer_bbox(raw_vertices)
+    if center == 'none':
+        # loadmesh applies no transform to this mesh, so the mesh frame IS the file's raw frame.
+        return Normalizer(
+            scale=torch.tensor(1.0, dtype=raw_vertices.dtype, device=raw_vertices.device),
+            shift=torch.zeros(raw_vertices.shape[1], dtype=raw_vertices.dtype,
+                              device=raw_vertices.device))
+    return Normalizer.get_bounding_sphere_normalizer(raw_vertices)
 
 
 def loadmesh(dir, name, load_rings=False):
@@ -283,6 +315,12 @@ def loadmesh(dir, name, load_rings=False):
         mesh.vertices = normalizer(mesh.vertices)
         # Stops color_mesh/setcolor_mesh/arbcolor_mesh re-normalizing this mesh back into the
         # centroid frame on every colour update -- see MeshNormalizer.__call__.
+        mesh.frame_locked = True
+    elif center == 'none':
+        # Same announcement rule as 'bbox' above -- a frame that no output file records is exactly
+        # the kind of thing that goes wrong silently.
+        print(f'loadmesh: {dir} -> NO normalization, file is already in its intended frame '
+              f'({os.path.splitext(dir)[0]}.normalizer.json)')
         mesh.frame_locked = True
     else:
         MeshNormalizer(mesh)()

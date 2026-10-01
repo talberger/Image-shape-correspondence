@@ -45,7 +45,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modules.Normalization.Normalizer import Normalizer
-from modules.utils import load_mesh_normalizer_spec, loadmesh
+from modules.utils import loadmesh, mesh_frame_normalizer
 
 
 def read_raw_obj_vertices(obj_path):
@@ -90,10 +90,7 @@ def main(args):
     # sidecar -- rebuilding the default normalizer here would put the picked points in a different
     # frame from the vertices they are snapped against, which is silent (2026-09-02, twice).
     raw_vertices = raw_vertices.to(vertices.device)
-    if load_mesh_normalizer_spec(args.obj_path) == 'bbox':
-        normalizer = Normalizer.get_bounding_sphere_normalizer_bbox(raw_vertices)
-    else:
-        normalizer = Normalizer.get_bounding_sphere_normalizer(raw_vertices)
+    normalizer = mesh_frame_normalizer(args.obj_path, raw_vertices)
     shift = normalizer._shift.tolist()
     scale = float(normalizer._scale)
     is_identity = max(abs(v) for v in shift) < 1e-6 and abs(scale - 1.0) < 1e-6

@@ -110,6 +110,22 @@ def build_segment_index(fine_segments, coarse_mask):
     for s in range(1, num_segments + 1):
         rows, cols = np.nonzero(fine_segments == s)
         n = len(rows)
+        if n == 0:
+            # A segment can be EMPTY here even though build_fine_segments.py guarantees every
+            # segment >= min_pixels_in_object (200): train_relational_loss.py's --geodesic path
+            # passes a COPY of fine_segments with every non-geodesic-safe pixel zeroed, and a
+            # segment lying entirely OUTSIDE the mask's largest connected component loses all of
+            # its pixels that way. Measured 2026-09-20 on DensePose-LVIS: ann 3044 segment 4
+            # (452 px -> 0) and ann 4777 segment 14 (92 px -> 0), both of which crashed on the
+            # rows[0] padding read below.
+            # Such a segment can never be sampled FROM: centers are drawn from the
+            # LCC-restricted coarse_mask, geodesic_safe_mask is a subset of that LCC, and both
+            # failing instances had zero pixels of the empty segment inside the LCC -- so no
+            # center carries its id, and segment_pixel_count[s] == 0 keeps every sampler away
+            # regardless. Leave its padding rows as zeros.
+            # Instances with no empty segment are bit-identical: this branch is unreachable for
+            # them (it is exactly the case that used to raise).
+            continue
         segment_pixel_coords[s, :n, 0] = torch.from_numpy(rows.astype(np.int64))
         segment_pixel_coords[s, :n, 1] = torch.from_numpy(cols.astype(np.int64))
         if n < max_size:

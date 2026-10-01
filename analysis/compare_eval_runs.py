@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modules.Normalization.Normalizer import Normalizer
-from modules.utils import load_mesh_normalizer_spec
+from modules.utils import mesh_frame_normalizer
 
 
 def mesh_frame_scale(obj_path):
@@ -45,9 +45,7 @@ def mesh_frame_scale(obj_path):
             if line.startswith('v '):
                 verts.append([float(v) for v in line.split()[1:4]])
     v = torch.tensor(verts, dtype=torch.float32)
-    if load_mesh_normalizer_spec(obj_path) == 'bbox':
-        return float(Normalizer.get_bounding_sphere_normalizer_bbox(v)._scale)
-    return float(Normalizer.get_bounding_sphere_normalizer(v)._scale)
+    return float(mesh_frame_normalizer(obj_path, v)._scale)
 
 METRICS = ['geometric snap', 'feature argmax', 'soft mean distance']
 MEAN_KEY = {'geometric snap': 'mean_error_hard_snap',
