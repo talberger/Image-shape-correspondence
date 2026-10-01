@@ -1,0 +1,37 @@
+{
+ "ann_ids": [
+  113202,
+  113864,
+  11234,
+  26883,
+  14975,
+  231890,
+  117682,
+  154547,
+  88895,
+  115213,
+  229935,
+  240020,
+  184142,
+  171627,
+  14974,
+  904,
+  184143,
+  181825,
+  38529,
+  5459
+ ],
+ "rule": "bear ds2_val, 3 GT points, scored in run#1+#2 (129 eligible). 20 SHIC-error quantile bins, 1 random pick per bin; of 50000 draws (seed 0) kept the one whose means of SHIC / ours#1 / ours#2 / ZS and their paired gaps best match the full 129 (Tal 2026-09-29). FIXED -- use for all future subset evals.",
+ "full_means": {
+  "SHIC": 33.38,
+  "ours#1": 35.07,
+  "ours#2": 33.3,
+  "ZS": 39.36
+ },
+ "subset_means": {
+  "SHIC": 33.84,
+  "ours#1": 35.48,
+  "ours#2": 33.2,
+  "ZS": 39.3
+ }
+}

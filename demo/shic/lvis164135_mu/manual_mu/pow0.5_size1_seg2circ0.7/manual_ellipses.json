@@ -1,0 +1,107 @@
+{
+ "1": {
+  "n_px": 47546,
+  "spread_ratio_raw": 1.62,
+  "major": 1.128,
+  "minor": 0.887,
+  "angle_deg": 53.0,
+  "size_s0": 1.0
+ },
+ "2": {
+  "n_px": 2233,
+  "spread_ratio_raw": 4.18,
+  "major": 0.7,
+  "minor": 0.7,
+  "angle_deg": 32.5,
+  "size_s0": 1.0,
+  "override": "circle 0.7 (Tal 2026-09-29)"
+ },
+ "3": {
+  "n_px": 1654,
+  "spread_ratio_raw": 7.2,
+  "major": 1.638,
+  "minor": 0.61,
+  "angle_deg": 2.4,
+  "size_s0": 1.0
+ },
+ "4": {
+  "n_px": 1171,
+  "spread_ratio_raw": 5.15,
+  "major": 1.506,
+  "minor": 0.664,
+  "angle_deg": 48.9,
+  "size_s0": 1.0
+ },
+ "5": {
+  "n_px": 726,
+  "spread_ratio_raw": 2.28,
+  "major": 1.229,
+  "minor": 0.814,
+  "angle_deg": 110.5,
+  "size_s0": 1.0
+ },
+ "6": {
+  "n_px": 495,
+  "spread_ratio_raw": 3.25,
+  "major": 1.343,
+  "minor": 0.745,
+  "angle_deg": 45.0,
+  "size_s0": 1.0
+ },
+ "7": {
+  "n_px": 372,
+  "spread_ratio_raw": 1.31,
+  "major": 1.07,
+  "minor": 0.935,
+  "angle_deg": 37.4,
+  "size_s0": 1.0
+ },
+ "8": {
+  "n_px": 330,
+  "spread_ratio_raw": 1.64,
+  "major": 1.132,
+  "minor": 0.884,
+  "angle_deg": 70.6,
+  "size_s0": 1.0
+ },
+ "9": {
+  "n_px": 162,
+  "spread_ratio_raw": 1.73,
+  "major": 1.147,
+  "minor": 0.872,
+  "angle_deg": 169.5,
+  "size_s0": 1.0
+ },
+ "10": {
+  "n_px": 128,
+  "spread_ratio_raw": 1.81,
+  "major": 1.161,
+  "minor": 0.862,
+  "angle_deg": 81.8,
+  "size_s0": 1.0
+ },
+ "11": {
+  "n_px": 78,
+  "spread_ratio_raw": 1.45,
+  "major": 1.097,
+  "minor": 0.911,
+  "angle_deg": 158.0,
+  "size_s0": 1.0
+ },
+ "12": {
+  "n_px": 65,
+  "spread_ratio_raw": 6.53,
+  "major": 1.599,
+  "minor": 0.626,
+  "angle_deg": 93.0,
+  "size_s0": 1.0
+ },
+ "13": {
+  "n_px": 54,
+  "spread_ratio_raw": 9.92,
+  "major": 1.775,
+  "minor": 0.563,
+  "angle_deg": 99.3,
+  "size_s0": 1.0
+ }
+}
