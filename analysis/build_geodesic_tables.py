@@ -141,6 +141,39 @@ _WORKER_GRAPH = None
 _WORKER_CENTERS = None
 _WORKER_SHM_NAME = None
 _WORKER_SHAPE = None
+_WORKER_NODE_RC = None      # (rows, cols) of the graph nodes: set = feature-cost graph, the table holds path PIXEL lengths
+
+
+def path_pixel_lengths(pred, node_rows, node_cols):
+    """Pixel length of every shortest path of a Dijkstra predecessor matrix [n_sources, n_nodes] (pointer doubling).
+    Used when the graph's weights are NOT pixel lengths (--feature_geodesic): the weights choose the path, this measures it."""
+    P = np.where(pred < 0, np.arange(pred.shape[1])[None], pred)      # a source points at itself
+    L = np.hypot(node_rows[P] - node_rows[None], node_cols[P] - node_cols[None]).astype(np.float64)
+    while True:     # invariant: L[i] = pixel length of the path i -> P[i]
+        nxt = np.take_along_axis(P, P, 1)
+        if (nxt == P).all():
+            return L
+        L += np.take_along_axis(L, P, 1)
+        P = nxt
+
+
+def _dijkstra_rows(graph, sources, node_rc):
+    """Dijkstra from `sources`; the returned rows are the path costs, or, with node_rc, the paths' pixel lengths."""
+    if node_rc is None:
+        return scipy.sparse.csgraph.dijkstra(graph, indices=sources, directed=False)
+    dist, pred = scipy.sparse.csgraph.dijkstra(graph, indices=sources, directed=False, return_predecessors=True)
+    length = path_pixel_lengths(pred, *node_rc)
+    length[~np.isfinite(dist)] = np.inf
+    return length
+
+
+def feature_step_delta(feats, src_rows, src_cols, dst_rows, dst_cols, chunk=65536):
+    """1 - cos between the features of the two pixels of each edge; feats [H, W, C], L2-normalised."""
+    out = np.empty(len(src_rows), dtype=np.float64)
+    for s in range(0, len(src_rows), chunk):
+        e = slice(s, s + chunk)
+        out[e] = 1.0 - (feats[src_rows[e], src_cols[e]] * feats[dst_rows[e], dst_cols[e]]).sum(1)
+    return np.clip(out, 0.0, None)
 
 
 def _dijkstra_worker(bounds):
@@ -157,8 +190,7 @@ def _dijkstra_worker(bounds):
     shm = shared_memory.SharedMemory(name=_WORKER_SHM_NAME)
     try:
         table = np.ndarray(_WORKER_SHAPE, dtype=np.float32, buffer=shm.buf)
-        dist = scipy.sparse.csgraph.dijkstra(
-            _WORKER_GRAPH, indices=_WORKER_CENTERS[start:end], directed=False)
+        dist = _dijkstra_rows(_WORKER_GRAPH, _WORKER_CENTERS[start:end], _WORKER_NODE_RC)
         finite = np.isfinite(dist)
         n_nonfinite = int((~finite).sum())
         chunk_max = float(dist[finite].max()) if n_nonfinite < dist.size else 0.0
@@ -168,7 +200,7 @@ def _dijkstra_worker(bounds):
         shm.close()
 
 
-def _dijkstra_parallel(graph, center_nodes, num_mask_pixels, num_workers, chunk_size):
+def _dijkstra_parallel(graph, center_nodes, num_mask_pixels, num_workers, chunk_size, node_rc=None):
     """Multi-process replacement for the serial chunked Dijkstra loop. Splits the center list over
     `num_workers` processes (scipy's dijkstra is single-threaded regardless of how many sources it is
     handed, so the serial version used one core of the machine's many). The output table is a single
@@ -176,7 +208,7 @@ def _dijkstra_parallel(graph, center_nodes, num_mask_pixels, num_workers, chunk_
     data, and the same peak-memory property the serial chunking was introduced for: each worker only
     holds its own slice's float64 result at a time.
     """
-    global _WORKER_GRAPH, _WORKER_CENTERS, _WORKER_SHM_NAME, _WORKER_SHAPE
+    global _WORKER_GRAPH, _WORKER_CENTERS, _WORKER_SHM_NAME, _WORKER_SHAPE, _WORKER_NODE_RC
     import multiprocessing
     from multiprocessing import shared_memory
 
@@ -194,6 +226,7 @@ def _dijkstra_parallel(graph, center_nodes, num_mask_pixels, num_workers, chunk_
     try:
         _WORKER_GRAPH, _WORKER_CENTERS = graph, center_nodes
         _WORKER_SHM_NAME, _WORKER_SHAPE = shm.name, shape
+        _WORKER_NODE_RC = node_rc
 
         diagonal = 0.0
         t0 = time.time()
@@ -217,12 +250,12 @@ def _dijkstra_parallel(graph, center_nodes, num_mask_pixels, num_workers, chunk_
               f'({num_workers} workers, {len(bounds)} slices of <={step} centers)')
         return table, diagonal
     finally:
-        _WORKER_GRAPH = _WORKER_CENTERS = _WORKER_SHM_NAME = _WORKER_SHAPE = None
+        _WORKER_GRAPH = _WORKER_CENTERS = _WORKER_SHM_NAME = _WORKER_SHAPE = _WORKER_NODE_RC = None
         shm.close()
         shm.unlink()
 
 
-def true_geodesic_diameter(graph, mask_rows, mask_cols, max_sweeps=8):
+def true_geodesic_diameter(graph, mask_rows, mask_cols, max_sweeps=8, valid=None):
     """The TRUE 2D geodesic diameter over ALL pixel pairs, by the standard double sweep -- folded in
     here (2026-09-20) from analysis/measure_2d_geodesic_diameter.py, which was a separate ~90s
     process that rebuilt this exact graph from scratch only to run a handful of single-source
@@ -233,11 +266,15 @@ def true_geodesic_diameter(graph, mask_rows, mask_cols, max_sweeps=8):
     centers only, so it can only underestimate the true all-pairs diameter (see the standalone
     script's docstring for the full argument -- an underestimated mu_2D inflates every norm_d_2D).
     """
-    src, best, seen = 0, 0.0, set()
+    # valid (2026-10-07, occlusion domain): bool per node -- only these may be END POINTS of the diameter (the
+    # visible object pixels); paths still run through every node. None = every node, as before.
+    src, best, seen = (0 if valid is None else int(np.nonzero(valid)[0][0])), 0.0, set()
     t0 = time.time()
     for sweep in range(max_sweeps):
         d = scipy.sparse.csgraph.dijkstra(graph, indices=src, directed=False)
         d[~np.isfinite(d)] = -1
+        if valid is not None:
+            d[~valid] = -1
         far = int(np.argmax(d))
         far_d = float(d[far])
         print(f'  diameter sweep {sweep + 1}: from ({mask_rows[src]},{mask_cols[src]}) -> farthest '
@@ -273,8 +310,45 @@ def largest_connected_component(mask):
     return labeled == largest_label, num_components
 
 
-def build_2d_table(coords, coarse_mask, chunk_size=2000, num_workers=1, compute_true_diameter=False):
+def occlusion_domain(coarse_mask, domain_mask):
+    """OCCLUDED OBJECTS (Tal, 2026-10-07). An occluder (fence, branches, rider) splits the visible mask into parts and
+    largest_connected_component() then keeps ONE of them: on bear 206034 the training saw 37.5% of the mask, on 7107 34.3%;
+    63 of 133 evaluated horses lose > 5%. `domain_mask` is the object WITH its hidden parts (an amodal mask, e.g.
+    pix2gestalt's): 2D geodesics are measured through it, "as if the occluder is not there".
+    Returns (sampling_mask, domain):
+      domain        = largest connected component of (domain_mask | coarse_mask) -- the graph Dijkstra runs on;
+      sampling_mask = the VISIBLE pixels inside it -- the only pixels that may be centres / neighbours / table columns.
+    Hidden pixels carry the occluder's features, so they are never sampled; they only carry distance.
+    MUST be called identically by build_geodesic_tables.py and train_relational_loss.py (same rule as the
+    largest_connected_component call it replaces), or the sampled centres will not match the table's."""
+    domain, _ = largest_connected_component(domain_mask.astype(bool) | coarse_mask.astype(bool))
+    return coarse_mask.astype(bool) & domain, domain
+
+
+def restrict_table_to_visible(table, pixel_to_node, sampling_mask):
+    """A table built over the occlusion domain -> the same distances, columns kept for visible pixels only.
+    After this the table looks to the training exactly like an ordinary one over `sampling_mask`."""
+    p2n = pixel_to_node.numpy()
+    rows, cols = np.nonzero(sampling_mask)
+    keep = p2n[rows, cols]
+    if (keep < 0).any():
+        raise ValueError('a visible pixel is not a node of the occlusion domain -- sampling_mask/domain mismatch')
+    table = table[:, torch.from_numpy(keep)].contiguous()
+    new_p2n = -np.ones_like(p2n)
+    new_p2n[rows, cols] = np.arange(len(rows))
+    return table, torch.from_numpy(new_p2n), float(table.max())
+
+
+def build_2d_table(coords, coarse_mask, chunk_size=2000, num_workers=1, compute_true_diameter=False,
+                   endpoint_mask=None, feature_cost=None):
     """coords: int64 [n, 2] (row, col) of the fixed sample centers.
+
+    feature_cost (Tal, 2026-10-13, crowded parts; None = the original metric): dict(feats [H, W, C] L2-normalised ndarray,
+    beta, power). The step p -> q then costs |p - q| * (1 + beta * (delta / median_delta) ** power), delta = 1 - cos(f_p, f_q),
+    so a path avoids feature "walls" (head against body). The features only CHOOSE the path: the table value is the path's
+    length in PIXELS, and the true diameter stays the ORIGINAL pixel-metric one (a same-metric diameter is set by one pixel
+    behind a wall). A step that touches a hidden pixel of the occlusion domain (outside endpoint_mask) costs its plain
+    pixel length: it carries the occluder's features.
     coarse_mask: bool ndarray [H, W].
     Returns (table [n, H, W] float32, diagonal float, geodesic_safe_mask bool [H, W]).
 
@@ -327,7 +401,7 @@ def build_2d_table(coords, coarse_mask, chunk_size=2000, num_workers=1, compute_
     # the mask rather than a coarser grid-step count.
     offsets = [(-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
               (-1, -1, np.sqrt(2)), (-1, 1, np.sqrt(2)), (1, -1, np.sqrt(2)), (1, 1, np.sqrt(2))]
-    rows_list, cols_list, weights_list = [], [], []
+    rows_list, cols_list, weights_list, delta_list = [], [], [], []
     for dr, dc, w in offsets:
         nbr_rows = mask_rows + dr
         nbr_cols = mask_cols + dc
@@ -340,6 +414,13 @@ def build_2d_table(coords, coarse_mask, chunk_size=2000, num_workers=1, compute_
         rows_list.append(valid_src[on_mask])
         cols_list.append(nbr_node[on_mask])
         weights_list.append(np.full(on_mask.sum(), w, dtype=np.float64))
+        if feature_cost is not None:
+            s_r, s_c = mask_rows[valid_src[on_mask]], mask_cols[valid_src[on_mask]]
+            d_r, d_c = nbr_rows_v[on_mask], nbr_cols_v[on_mask]
+            delta = feature_step_delta(feature_cost['feats'], s_r, s_c, d_r, d_c)
+            if endpoint_mask is not None:
+                delta[~(endpoint_mask[s_r, s_c] & endpoint_mask[d_r, d_c])] = np.nan
+            delta_list.append(delta)
 
     graph_rows = np.concatenate(rows_list)
     graph_cols = np.concatenate(cols_list)
@@ -375,13 +456,27 @@ def build_2d_table(coords, coarse_mask, chunk_size=2000, num_workers=1, compute_
     # num_centers*num_mask_pixels*8 bytes, independent of how large num_centers gets.
     # The all-pairs diameter runs on the graph while it is still in memory -- see
     # true_geodesic_diameter's docstring for why this used to be a separate 90s process.
-    true_diameter = (true_geodesic_diameter(graph, mask_rows, mask_cols)
+    true_diameter = (true_geodesic_diameter(
+        graph, mask_rows, mask_cols,
+        valid=None if endpoint_mask is None else endpoint_mask[mask_rows, mask_cols])
                      if compute_true_diameter else None)
+
+    node_rc = None
+    if feature_cost is not None:
+        delta = np.concatenate(delta_list)
+        median = float(np.nanmedian(delta))
+        rel = np.nan_to_num(delta / median, nan=0.0)
+        beta, power = feature_cost['beta'], feature_cost['power']
+        print(f'2D: FEATURE step cost, beta {beta:g}, power {power:g}; delta = 1 - cos: median {median:.3e}, '
+              f'max {np.nanmax(delta):.3e}; steps costing > 2x their length: {100.0 * (beta * rel ** power > 1).mean():.2f}%')
+        graph = scipy.sparse.csr_matrix((graph_weights * (1.0 + beta * rel ** power), (graph_rows, graph_cols)),
+                                        shape=(num_mask_pixels, num_mask_pixels))
+        node_rc = (mask_rows, mask_cols)
 
     num_centers = len(center_nodes)
     if num_workers > 1:
         table, diagonal = _dijkstra_parallel(
-            graph, center_nodes, num_mask_pixels, num_workers, chunk_size)
+            graph, center_nodes, num_mask_pixels, num_workers, chunk_size, node_rc=node_rc)
         return (torch.from_numpy(table), diagonal, geodesic_safe_mask,
                 torch.from_numpy(pixel_to_node), true_diameter)
 
@@ -390,8 +485,7 @@ def build_2d_table(coords, coarse_mask, chunk_size=2000, num_workers=1, compute_
     t0 = time.time()
     for start in range(0, num_centers, chunk_size):
         end = min(start + chunk_size, num_centers)
-        chunk_dist = scipy.sparse.csgraph.dijkstra(
-            graph, indices=center_nodes[start:end], directed=False)
+        chunk_dist = _dijkstra_rows(graph, center_nodes[start:end], node_rc)
 
         chunk_finite = np.isfinite(chunk_dist)
         if not chunk_finite.all():
@@ -435,7 +529,15 @@ def main(args):
     # Restrict to the largest connected component BEFORE sampling centers, not just inside
     # build_2d_table -- see largest_connected_component's docstring for why sampling against the
     # raw mask can crash. A no-op (same array back) when the mask is already one component.
-    coarse_mask, _num_components = largest_connected_component(coarse_mask)
+    domain = None
+    if args.geodesic_domain_mask_path:
+        visible_px = int(coarse_mask.sum())
+        coarse_mask, domain = occlusion_domain(
+            coarse_mask, torch.load(args.geodesic_domain_mask_path, map_location='cpu').numpy())
+        print(f'--geodesic_domain_mask_path: domain {int(domain.sum())} px; visible pixels inside it '
+              f'{int(coarse_mask.sum())}/{visible_px} ({100.0 * coarse_mask.sum() / visible_px:.1f}%)')
+    else:
+        coarse_mask, _num_components = largest_connected_component(coarse_mask)
 
     if args.center_mode == 'grid':
         # CANDIDATE POOL, not a fixed center set -- built for --resample_centers
@@ -453,9 +555,29 @@ def main(args):
             coarse_mask, fine_segments, args.num_center_pixels, seed=args.seed)
         suffix = f'_seed{args.seed}'
 
-    table_2d, diag_2d, geodesic_safe_mask, pixel_to_node, true_diameter_2d = build_2d_table(
-        coords, coarse_mask, chunk_size=args.chunk_size, num_workers=args.num_workers,
-        compute_true_diameter=args.true_diameter)
+    feature_cost = None
+    if args.feature_geodesic is not None:
+        if not args.pix_features_path:
+            raise ValueError('--feature_geodesic needs --pix_features_path')
+        feats = torch.load(args.pix_features_path, map_location='cpu').float().squeeze()
+        if tuple(feats.shape[:2]) != coarse_mask.shape:      # (C, H, W) -> (H, W, C)
+            feats = feats.permute(1, 2, 0)
+        assert tuple(feats.shape[:2]) == coarse_mask.shape, (feats.shape, coarse_mask.shape)
+        feature_cost = {'feats': torch.nn.functional.normalize(feats, dim=-1).numpy(),
+                        'beta': args.feature_geodesic[0], 'power': args.feature_geodesic[1]}
+
+    if domain is None:
+        table_2d, diag_2d, geodesic_safe_mask, pixel_to_node, true_diameter_2d = build_2d_table(
+            coords, coarse_mask, chunk_size=args.chunk_size, num_workers=args.num_workers,
+            compute_true_diameter=args.true_diameter, feature_cost=feature_cost)
+    else:
+        # Dijkstra over the whole domain (paths cross the occluder), diameter between VISIBLE pixels only,
+        # then the columns of hidden pixels are dropped.
+        table_2d, _, _, pixel_to_node, true_diameter_2d = build_2d_table(
+            coords, domain, chunk_size=args.chunk_size, num_workers=args.num_workers,
+            compute_true_diameter=args.true_diameter, endpoint_mask=coarse_mask, feature_cost=feature_cost)
+        table_2d, pixel_to_node, diag_2d = restrict_table_to_visible(table_2d, pixel_to_node, coarse_mask)
+        geodesic_safe_mask = coarse_mask
     path_2d = os.path.join(
         args.out_dir,
         f'{os.path.splitext(os.path.basename(args.object_mask_path))[0]}_geo_table_2d{suffix}.pth')
@@ -473,7 +595,10 @@ def main(args):
         # coarse_mask, for sample_out_segment_neighbors's candidate pool, or a disconnected
         # speck pixel can get drawn as a "neighbour" and produce inf.
         'geodesic_safe_mask': torch.from_numpy(geodesic_safe_mask),
+        'geodesic_domain_mask_path': args.geodesic_domain_mask_path,
+        'geodesic_domain': None if domain is None else torch.from_numpy(domain),
         'object_mask_path': args.object_mask_path,
+        'feature_geodesic': args.feature_geodesic, 'pix_features_path': args.pix_features_path,
         'center_mode': args.center_mode,
         # num_center_pixels/seed kept for the 'random' (existing, exact-match) mode's own
         # load_geodesic_table_2d validation; grid_stride for the 'grid' (pool) mode's.
@@ -487,7 +612,7 @@ def main(args):
     # geo_diag_2d from here to hand phase-2; the shell pipeline still awks it off stdout.
     meta_path = os.path.splitext(path_2d)[0] + '_meta.json'
     with open(meta_path, 'w') as f:
-        json.dump({'diagonal': diag_2d, 'true_diameter_2d': true_diameter_2d,
+        json.dump({'diagonal': diag_2d, 'true_diameter_2d': true_diameter_2d, 'feature_geodesic': args.feature_geodesic,
                    'num_centers': int(table_2d.shape[0]), 'num_mask_pixels': int(table_2d.shape[1]),
                    'table_path': path_2d}, f, indent=1)
     print(f'saved sidecar {meta_path}')
@@ -507,6 +632,10 @@ if __name__ == '__main__':
                              '(mesh bbox diagonal ~1.89), so 0.15 is a generous margin above '
                              'ordinary heat-method approximation error, not a per-entry tolerance')
     parser.add_argument('--object_mask_path', type=str, required=True)
+    parser.add_argument('--geodesic_domain_mask_path', type=str, default=None,
+                        help='bool [H, W] .pth: the object INCLUDING its occluded parts (amodal mask). 2D geodesics '
+                             'run through it; centres / neighbours stay on the visible mask (Tal, 2026-10-07, see '
+                             'occlusion_domain). Unset = every run before that date.')
     parser.add_argument('--fine_seg_path', type=str,
                         default='./demo/guitar/phase2/guitar_01_fine_segments.pth')
     parser.add_argument('--center_mode', type=str, choices=['random', 'grid'], default='random',
@@ -549,6 +678,13 @@ if __name__ == '__main__':
                              'float64 AND float32 tables in memory at once (see build_2d_table\'s '
                              'docstring: this OOM-killed a --center_mode grid build at the '
                              'container\'s 58GB cgroup limit before this flag existed).')
+    parser.add_argument('--feature_geodesic', type=float, nargs=2, default=None, metavar=('BETA', 'POWER'),
+                        help='2D paths chosen by a FEATURE step cost, |p - q| * (1 + BETA * (delta / median) ** POWER), '
+                             'delta = 1 - cos of the step\'s two pixel features; the table holds the path length in pixels '
+                             'and the true diameter stays the pixel-metric one (see build_2d_table). Default = the '
+                             'original metric. Needs --pix_features_path. Tal chose 100 8 (2026-10-13).')
+    parser.add_argument('--pix_features_path', type=str, default=None,
+                        help='--feature_geodesic only: the photo\'s per-pixel features (the training\'s own)')
     parser.add_argument('--out_dir', type=str, required=True)
 
     args = parser.parse_args()

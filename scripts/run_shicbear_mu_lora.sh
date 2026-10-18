@@ -18,6 +18,8 @@ MU=${MU:-learn}; MU_LR=${MU_LR:-1e-2}; MU_GRID=${MU_GRID:-6}; SUFFIX=${SUFFIX:-}
 # FIX_SEG="2:2.5" (2026-09-29): globalthenaniso, at the switch fix seg 2 to a circle 2.5, the rest learned
 # STAGEA_FIXED=1 (2026-09-29): with SWITCH_HYBRID + MU_FIXED, the manual file is frozen from step 0 (stage A = manual global row)
 # SWITCH_HYBRID=1 (2026-09-28): two-stage whose stage B is the HYBRID (8 in + 8 out); with MU_FIXED = a file WITH the global row, all frozen
+# NO_LORA=1 (2026-10-01, Tal: bear3 LoRA ablation): same recipe, the whole encoder fine-tunes (no LORA-W, no read-time alpha)
+NO_LORA=${NO_LORA:-}; if [ -n "$NO_LORA" ]; then LORA_TAG=nolora; LORA_FLAGS=""; else LORA_TAG=loraW_all_r4_lr1e-3; LORA_FLAGS="--lora_w_rank 4 --lora_w_layers ${LORA_LAYERS:-all} --lora_w_lr 1e-3"; fi
 NIN=${NIN:-16}; NOUT=${NOUT:-0}   # neighbours in / out of the centre's fine segment (NOUT>0: globalaniso / anisoxglobal only)
 IMG_TAG=${IMG_TAG:-bear3}
 case "$MU" in
@@ -26,6 +28,7 @@ case "$MU" in
   grid)        MUFLAGS="--mu_mode learned --mu_scope grid_aniso --mu_grid $MU_GRID --mu_lr $MU_LR" ;;
   globalaniso) MUFLAGS="--mu_mode learned --mu_scope global_aniso --mu_lr $MU_LR" ;;
   globalthenaniso) MUFLAGS="--mu_mode learned --mu_scope global_then_segment_aniso --mu_switch_step ${SWITCH:-150} --mu_lr $MU_LR${MU_FIXED:+ --mu_aniso_fixed_path $MU_FIXED}${SWITCH_HYBRID:+ --switch_hybrid --switch_nin 8 --switch_nout 8}${STAGEA_FIXED:+ --stageA_fixed}${FIX_SEG:+ --mu_fix_seg_circle $FIX_SEG}${GCIRCLE:+ --stageA_fixed_circle $GCIRCLE}" ;;   # stage A global in+out, stage B per-seg 16 in
+  dualaniso)   MUFLAGS="--mu_mode learned --mu_scope dual_global_local_aniso --dual_local_nin ${DUAL_NIN:-16} --mu_lr $MU_LR" ;;   # (2026-10-01) global term NIN/NOUT + local per-seg term DUAL_NIN in, together 1:1
   anisoxglobal) MUFLAGS="--mu_mode learned --mu_scope segment_aniso_xglobal --mu_lr $MU_LR${MU_FIXED:+ --mu_aniso_fixed_path $MU_FIXED}" ;;   # per-seg ellipse in-seg, global ellipse cross-seg
   *) echo "unknown MU=$MU"; exit 1 ;;
 esac
@@ -40,7 +43,7 @@ if [ "$IMG_TAG" = bear3 ]; then
   GEO2D=./experiments/shic_bear/geodesic_tables/bear3_click_350_300_sam_mask_1_geo_table_2d_seed0.pth
   PIX=demo/shic/features_analyze/sdsquare_fuse16/bear3_pix_sdsquare_fuse16.pth
   DIAG=967.21; RET_STRIDE=${RET_STRIDE:-5}
-  S=sdsquare_truediag2d_mu_${MU}_perseg_cycv2T0.05_c1.676e-05_retstride${RET_STRIDE}_loraW_all_r4_lr1e-3_T0.01_seed0${SUFFIX}
+  S=sdsquare_truediag2d_mu_${MU}_perseg_cycv2T0.05_c1.676e-05_retstride${RET_STRIDE}_${LORA_TAG}_T0.01_seed0${SUFFIX}
   P2=./experiments/shic_bear/encoder_${S}_phase2
   RUN=demo/shic/bear3_${S}_phase2
 else
@@ -51,7 +54,7 @@ else
   PIX=$D/${IMG_TAG}_pix_sdsquare_fuse16.pth
   DIAG=$(python -c "import json; print(json.load(open('$D/${IMG_TAG}_mask_geo_table_2d_seed0_meta.json'))['true_diameter_2d'])")
   RET_STRIDE=${RET_STRIDE:-3}
-  S=mu_${MU}_perseg_cycv2T0.05_c1.676e-05_retstride${RET_STRIDE}_loraW_all_r4_lr1e-3_T0.01_seed0${SUFFIX}
+  S=mu_${MU}_perseg_cycv2T0.05_c1.676e-05_retstride${RET_STRIDE}_${LORA_TAG}_T0.01_seed0${SUFFIX}
   P2=./experiments/shic_$CLASS/lvis/${IMG_TAG}/encoder_${S}_phase2
   RUN=demo/shic/${IMG_TAG}_mu/${S}
 fi
@@ -64,9 +67,17 @@ if [ ! -f "$P2/pred_f.pth" ]; then
     $MUFLAGS --mu_fit_space abs \
     --num_neighbors_in_segment $NIN --num_neighbors_out_segment $NOUT \
     --cyc_weight 1.676e-05 --cyc_v2 --cyc_temperature 0.05 --cyc_return_all_pixels --cyc_return_stride $RET_STRIDE \
-    --lora_w_rank 4 --lora_w_layers ${LORA_LAYERS:-all} --lora_w_lr 1e-3 --out_dir "$P2"
+    $LORA_FLAGS --out_dir "$P2"
 fi
 
+if [ -n "$NO_LORA" ]; then
+  if [ "$IMG_TAG" = bear3 ]; then
+    P2=$P2 RUN=$RUN PIX=$PIX READ_T=0.01 LABEL="no LoRA (full fine-tune), mu=$MU$SUFFIX" bash scripts/analyze_shicbear_arm.sh
+  else
+    CLASS=$CLASS ANN_ID=${IMG_TAG#lvis} PRED_F=$P2/pred_f.pth BASE=$RUN bash scripts/make_lvis_arm_summary.sh
+  fi
+  echo "MU-NOLORA DONE: $RUN"; exit 0
+fi
 python analysis/export_pred_f_lora_alpha.py --obj_path "$OBJ" --name "$NAME" \
   --phase1_checkpoint "$P1/encoder_checkpoint.pth" --lora_checkpoint "$P2/encoder_checkpoint.pth" \
   --alphas $ALPHA --out_dir "$P2/alpha"

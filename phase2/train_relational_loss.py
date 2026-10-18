@@ -132,6 +132,18 @@ def switch_aniso_mu_scale(mu_aniso, coords, neighbor_coords, center_groups, glob
     return aniso_mu_scale(mu_aniso[:-1], coords, neighbor_coords, center_groups)
 
 
+def dual_aniso_mu_scale(mu_aniso, coords, neighbor_coords, center_groups, n_global):
+    """--mu_scope dual_global_local_aniso (Tal, 2026-10-01): TWO rkd_spatial_dist terms in the SAME step, 1:1.
+    The first n_global neighbour columns are the GLOBAL term's pairs (in + out of segment) and use ONE shared ellipse
+    (the LAST row of mu_aniso, as stage A of global_then_segment_aniso); the remaining columns are the LOCAL term's
+    pairs (in-segment only) and use their centre's segment ellipse (rows 0..S-1, as stage B). Both sets are averaged in
+    one Huber mean, so with equal column counts the two terms weigh 1:1. Unlike the hybrid, an in-segment pair of the
+    global set is still held by the global ellipse."""
+    s_glob = aniso_scale_from_params(mu_aniso[-1:].expand(coords.shape[0], 3), coords, neighbor_coords[:, :n_global])
+    s_loc = aniso_mu_scale(mu_aniso[:-1], coords, neighbor_coords[:, n_global:], center_groups)
+    return torch.cat([s_glob, s_loc], dim=1)
+
+
 def grid_center_params(mu_grid, coords, bbox, grid):
     """--mu_scope grid_aniso: the (a, b, c) field lives on a grid x grid lattice of NODES spanning the
     mask's bounding box; each centre gets the BILINEAR interpolation of its 4 surrounding nodes, so the
@@ -461,6 +473,9 @@ def train(args):
     # happened to consume. That second reseed is what makes e.g. --feat_mu_mode fixed vs live a
     # clean A/B: 'live' skips measure_feature_mu's 5 draws, which would otherwise shift every
     # subsequent neighbour draw and confound the comparison.
+    if args.out_neighbors_segmented_only:
+        import modules.relational_loss as _rl
+        _rl.OUT_NEIGHBORS_SEGMENTED_ONLY = True
     torch.manual_seed(args.train_seed)
     mesh = loadmesh(dir=args.obj_path, name=args.name, load_rings=True)
     vertices = mesh.vertices
@@ -497,8 +512,14 @@ def train(args):
         # --geodesic only: Euclidean training never touches the 2D table and a speck center is
         # harmless there (see build_2d_table's docstring) -- restricting unconditionally would
         # silently change which centers existing Euclidean (guitar) runs draw, for no benefit.
-        from analysis.build_geodesic_tables import largest_connected_component
-        coarse_mask, _num_components = largest_connected_component(coarse_mask)
+        from analysis.build_geodesic_tables import largest_connected_component, occlusion_domain
+        if args.geodesic_domain_mask_path:
+            # OCCLUDED OBJECT (Tal, 2026-10-07): the table was built through the amodal domain, so the visible
+            # pixels of EVERY part are usable -- same call as the table builder made (see occlusion_domain).
+            coarse_mask, _domain = occlusion_domain(
+                coarse_mask, torch.load(args.geodesic_domain_mask_path, map_location='cpu').numpy())
+        else:
+            coarse_mask, _num_components = largest_connected_component(coarse_mask)
 
     if args.resample_centers:
         if args.cyc_weight > 0.0:
@@ -632,6 +653,8 @@ def train(args):
             f'see build_segment_index in modules/relational_loss.py.')
 
     num_neighbors = args.num_neighbors_in_segment + args.num_neighbors_out_segment
+    if args.mu_scope == 'dual_global_local_aniso':
+        num_neighbors += args.dual_local_nin          # global set (in + out) followed by the local set (in only)
 
     # Cycle-consistency needs a 2D geodesic table too, but is otherwise independent of
     # --geodesic (which is about d_2D/d_3D in relational_loss itself) -- reuse the table already
@@ -865,11 +888,11 @@ def train(args):
     if args.mu_mode != 'fixed':
         if not args.geodesic:
             raise SystemExit('--mu_mode %s is only implemented for the geodesic loss' % args.mu_mode)
-        if args.mu_scope in ('segment_aniso', 'grid_aniso', 'global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso'):
+        if args.mu_scope in ('segment_aniso', 'grid_aniso', 'global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso', 'dual_global_local_aniso'):
             if args.mu_mode != 'learned':
                 raise SystemExit('--mu_scope %s is implemented for --mu_mode learned only' % args.mu_scope)
             # global_aniso: ONE ellipse, so an out-of-segment pair has no ambiguity -- allowed (Tal, 2026-09-27)
-            if args.num_neighbors_out_segment > 0 and args.mu_scope not in ('global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso'):
+            if args.num_neighbors_out_segment > 0 and args.mu_scope not in ('global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso', 'dual_global_local_aniso'):
                 raise SystemExit('--mu_scope segment_aniso: out-of-segment pairs have no single segment '
                                  'ellipse (the isotropic path uses a geometric mean) -- not defined yet; '
                                  'use --num_neighbors_out_segment 0')
@@ -886,6 +909,14 @@ def train(args):
                 raise SystemExit('--mu_scope global_then_segment_aniso needs --mu_switch_step (and no --fixed_neighbors)')
             if args.switch_nin + args.switch_nout != args.num_neighbors_in_segment + args.num_neighbors_out_segment:
                 raise SystemExit('--switch_nin + --switch_nout must equal the stage-A neighbour count (tensor shapes)')
+            seg_vals = torch.unique(segment_ids)
+            mu_n_groups = int(max(seg_vals.max().item(), int(fine_segments.max()))) + 1 + 1
+            mu_groups = segment_ids.to(device).long()
+            mu_seg_map = torch.as_tensor(fine_segments, device=device).long()
+        elif args.mu_scope == 'dual_global_local_aniso':
+            # same layout as the two-stage: rows 0..S-1 per fine segment (LOCAL term), the LAST row = the GLOBAL term's ellipse
+            if args.fixed_neighbors or args.dual_local_nin <= 0:
+                raise SystemExit('--mu_scope dual_global_local_aniso needs --dual_local_nin > 0 (and no --fixed_neighbors)')
             seg_vals = torch.unique(segment_ids)
             mu_n_groups = int(max(seg_vals.max().item(), int(fine_segments.max()))) + 1 + 1
             mu_groups = segment_ids.to(device).long()
@@ -910,7 +941,7 @@ def train(args):
         else:
             mu_n_groups = 1
             mu_groups = None
-        if args.mu_mode == 'learned' and args.mu_scope in ('segment_aniso', 'grid_aniso', 'global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso'):
+        if args.mu_mode == 'learned' and args.mu_scope in ('segment_aniso', 'grid_aniso', 'global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso', 'dual_global_local_aniso'):
             # [G, 3] = (a, b, c); a = b = log s0, c = 0 -> a circle of radius s0 (s0 = 1, or --mu_init_path)
             init = torch.ones(mu_n_groups)
             if args.mu_init_path is not None:
@@ -1024,6 +1055,19 @@ def train(args):
 
         switch_global = (args.mu_scope == 'global_then_segment_aniso' and step < args.mu_switch_step)
         if args.mu_scope == 'global_then_segment_aniso' and step == args.mu_switch_step:
+            if not args.no_step_checkpoints or args.save_stageA_end:
+                # END OF STAGE A (2026-10-06, Tal: back-projection after stage 1): the encoder and the global ellipse
+                # exactly as stage A left them, before the first stage-B step. Same keys as a step checkpoint.
+                torch.save({'encoder_state_dict': (merged_state_dict(encoder) if args.lora_w_rank > 0
+                                                   else encoder.state_dict()),
+                            'lora_state': lora_state(encoder) if args.lora_w_rank > 0 else None,
+                            'fourier_basis': get_fourier_basis(encoder), 'step': step - 1},
+                           os.path.join(args.out_dir, 'encoder_checkpoint_stageA_end.pth'))
+                _maj, _min, _ang = aniso_axes(mu_aniso)
+                torch.save({'mu_aniso': mu_aniso.detach().cpu(), 'major': _maj.cpu(), 'minor': _min.cpu(),
+                            'major_angle_deg': _ang.cpu(), 'present_groups': torch.unique(segment_ids).cpu(),
+                            'scope': args.mu_scope, 'grid': None, 'grid_bbox': None},
+                           os.path.join(args.out_dir, 'mu_aniso_stageA_end.pth'))
             with torch.no_grad():
                 mu_aniso[:-1] = mu_aniso[-1]          # stage B starts every segment at the global ellipse
                 if args.mu_aniso_fixed_path is not None:
@@ -1070,6 +1114,9 @@ def train(args):
                 coords, segment_ids, seg_idx, k=n_out,
                 max_retries=args.out_segment_max_retries)
             neighbor_coords = torch.cat([neighbor_coords_in, neighbor_coords_out], dim=1)
+            if args.mu_scope == 'dual_global_local_aniso':
+                neighbor_coords = torch.cat([neighbor_coords, sample_in_segment_neighbors(
+                    coords, segment_ids, seg_idx, k=args.dual_local_nin)], dim=1)
 
         # Same flat-batch pattern as train_mapping_loss.py: centers are rows
         # [:n], neighbour (i, j) is row n + i*num_neighbors + j.
@@ -1115,6 +1162,9 @@ def train(args):
                                                    mu_seg_map[neighbor_coords[..., 0].to(device),
                                                               neighbor_coords[..., 1].to(device)])
                              if args.mu_scope == 'global_then_segment_aniso' and args.switch_hybrid and not switch_global else
+                             dual_aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups,
+                                                 args.num_neighbors_in_segment + args.num_neighbors_out_segment)
+                             if args.mu_scope == 'dual_global_local_aniso' else
                              switch_aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups, switch_global)
                              if args.mu_scope == 'global_then_segment_aniso' else
                              aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups)
@@ -1485,7 +1535,7 @@ def train(args):
               % ('grid node' if args.mu_scope == 'grid_aniso' else 'segment'))
         for g in (range(mu_n_groups) if args.mu_scope in ('grid_aniso', 'global_aniso')
                   else torch.unique(segment_ids).tolist()
-                  + ([mu_n_groups - 1] if args.mu_scope in ('segment_aniso_xglobal', 'global_then_segment_aniso') else [])):
+                  + ([mu_n_groups - 1] if args.mu_scope in ('segment_aniso_xglobal', 'global_then_segment_aniso', 'dual_global_local_aniso') else [])):
             print('  seg %2d  %.3f / %.3f / %5.1f deg  (ratio %.3f)'
                   % (g, major[g].item(), minor[g].item(), ang[g].item(), (major[g] / minor[g]).item()))
 
@@ -1778,7 +1828,7 @@ if __name__ == '__main__':
                              "every step (s* = sum(b^2)/sum(a*b) over the sampled pairs, detached; "
                              "no parameter and no lr to tune). 'learned': an nn.Parameter trained "
                              'by Adam at --mu_lr, init 1.0. Geodesic loss only.')
-    parser.add_argument('--mu_scope', type=str, default='global', choices=['global', 'segment', 'segment_aniso', 'grid_aniso', 'global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso'],
+    parser.add_argument('--mu_scope', type=str, default='global', choices=['global', 'segment', 'segment_aniso', 'grid_aniso', 'global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso', 'dual_global_local_aniso', 'dual_global_segment_aniso'],
                         help='--mu_mode optimal/learned: one scale for the whole object, or one '
                              'PER FINE SEGMENT. A pair belongs to its CENTRE pixel\'s segment. '
                              'Per-segment is the anisotropy test: a single scalar can only fix a '
@@ -1787,6 +1837,9 @@ if __name__ == '__main__':
     parser.add_argument('--mu_switch_step', type=int, default=None,
                         help='--mu_scope global_then_segment_aniso: first step of stage B (per-segment ellipses, in-segment pairs)')
     parser.add_argument('--switch_nin', type=int, default=16, help='stage-B in-segment neighbours')
+    parser.add_argument('--dual_local_nin', type=int, default=0,
+                        help='--mu_scope dual_global_local_aniso: in-segment neighbours of the LOCAL (per-segment ellipse) term; '
+                             'the GLOBAL term uses --num_neighbors_in/out_segment (Tal 2026-10-01)')
     parser.add_argument('--switch_hybrid', action='store_true',
                         help='global_then_segment_aniso: stage B is the HYBRID (in-seg pair -> its segment ellipse, cross-seg pair -> the global row); use with --switch_nout > 0 (Tal 2026-09-28)')
     parser.add_argument('--mu_aniso_fixed_path', type=str, default=None,
@@ -1933,6 +1986,15 @@ if __name__ == '__main__':
                              '--cyc_weight is parked at 0.0 as of this finding.')
 
     # Optimization -- same discipline as train_mapping_loss.py.
+    parser.add_argument('--out_neighbors_segmented_only', action='store_true',
+                        help='out-of-segment neighbours are never drawn from mask pixels that have no fine segment '
+                             '(Tal, 2026-10-06). Off = every run before that date')
+    parser.add_argument('--geodesic_domain_mask_path', type=str, default=None,
+                        help='amodal mask the 2D geodesic table was built through (build_geodesic_tables.py flag of '
+                             'the same name; Tal, 2026-10-07). Unset = every run before that date.')
+    parser.add_argument('--save_stageA_end', action='store_true',
+                        help='write the end-of-stage-A save (encoder_checkpoint_stageA_end.pth, mu_aniso_stageA_end.pth) '
+                             'even with --no_step_checkpoints (Tal, 2026-10-07: keep the stage-1 state, drop the 12 step dumps)')
     parser.add_argument('--no_step_checkpoints', action='store_true',
                         help='skip the intermediate encoder_checkpoint_step<N>.pth dumps, writing '
                              'only the final encoder_checkpoint.pth (2026-09-20). The step ladder '
@@ -1962,6 +2024,8 @@ if __name__ == '__main__':
     parser.add_argument('--out_dir', type=str,
                         default='./experiments/guitar/encoder_dino_relational')
     args = parser.parse_args()
+    if args.mu_scope == 'dual_global_segment_aniso':   # old name (2026-10-01, renamed the same day; the first horse run's run_config has it)
+        args.mu_scope = 'dual_global_local_aniso'
 
     if args.mu_mode != 'fixed':
         if args.mu_3d_scale != 1.0:

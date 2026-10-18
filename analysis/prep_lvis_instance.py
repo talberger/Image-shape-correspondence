@@ -27,6 +27,10 @@ def main():
                          'than native so num_center_pixels/min_pixels_in_object/cyc_return_stride keep '
                          'meaning the same thing across instances that differ ~20x in bbox area.')
     ap.add_argument('--out_dir', required=True)
+    ap.add_argument('--mask_source', default='polygon', choices=['polygon', 'sam3'],
+                    help='polygon = the LVIS polygon (every run before 2026-10-08). sam3 = no polygon (Tal, 2026-10-08: only the image goes in): '
+                         'the object mask is <out_dir>/<tag>_sam3_mask.pth, SAM 3 box-prompted with the whole crop (scripts/make_sam3_mask.sh, '
+                         'must exist beforehand). The bbox crop and the GT points still come from LVIS.')
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -41,6 +45,9 @@ def main():
     crop = img.crop(box).resize(size, Image.BICUBIC)
     m = Image.fromarray(polygon_mask(a['segmentation'], H0, W0)).crop(box).resize(size, Image.NEAREST)
     mask = torch.from_numpy(np.array(m) > 0)
+    if args.mask_source == 'sam3':
+        mask = torch.load(os.path.join(args.out_dir, f'lvis{args.ann_id}_sam3_mask.pth')).bool()
+        assert tuple(mask.shape) == (size[1], size[0]), (mask.shape, size)
 
     px = x + np.array(a['dp_x']) / 256.0 * w
     py = y + np.array(a['dp_y']) / 256.0 * h

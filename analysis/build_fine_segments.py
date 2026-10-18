@@ -99,6 +99,52 @@ def build_label_map(anns, coarse_mask, min_pixels_in_object):
     return final, counts
 
 
+def merge_small_segments(labels, min_pixels):
+    """Segments with fewer than `min_pixels` pixels get no label of their own (Tal, 2026-10-06).
+
+    Each one, smallest first, is absorbed by the neighbouring segment it shares the longest border with
+    (4-neighbourhood) among the segments that are NOT small; one touching none of those goes to the largest. Labels are then
+    renumbered 1..K by size, largest first. Unassigned pixels (label 0) are left as they are.
+    """
+    labels = labels.copy()
+    while True:
+        ids, counts = np.unique(labels[labels > 0], return_counts=True)
+        small = [(n, i) for i, n in zip(ids.tolist(), counts.tolist()) if n < min_pixels]
+        if not small or len(ids) == 1:
+            break
+        _, i = min(small)
+        m = labels == i
+        border = np.zeros_like(m)
+        border[1:] |= m[:-1]; border[:-1] |= m[1:]; border[:, 1:] |= m[:, :-1]; border[:, :-1] |= m[:, 1:]
+        nb = labels[border & ~m]
+        big = ids[counts >= min_pixels]              # absorb only into a segment that keeps its own label
+        nb = nb[np.isin(nb, big)]
+        if nb.size:
+            target = int(np.bincount(nb).argmax())
+        else:
+            target = int(ids[np.argmax(np.where(ids == i, -1, counts))])
+        labels[m] = target
+    ids, counts = np.unique(labels[labels > 0], return_counts=True)
+    order = np.argsort(-counts, kind='stable')
+    final = np.zeros_like(labels)
+    for new, k in enumerate(order):
+        final[labels == ids[k]] = new + 1
+    return final, [int(counts[k]) for k in order]
+
+
+def fill_unlabelled(labels, coarse_mask):
+    """Every object pixel SAM left without a segment joins the nearest labelled pixel's segment (Tal, 2026-10-07, TRIAL).
+    Why: centres are drawn only from labelled pixels, so unlabelled parts of the animal never train -- 28.9% of bear 7107's mask.
+    Nearest = Euclidean, in the image. Returns (labels, counts) with the same numbering."""
+    from scipy import ndimage
+    todo = coarse_mask & (labels == 0)
+    if not todo.any() or not (labels > 0).any():
+        return labels, [int((labels == i).sum()) for i in range(1, int(labels.max()) + 1)]
+    _, (ri, ci) = ndimage.distance_transform_edt(labels == 0, return_indices=True)
+    out = labels.copy(); out[todo] = labels[ri[todo], ci[todo]]
+    return out, [int((out == i).sum()) for i in range(1, int(out.max()) + 1)]
+
+
 def save_label_png(labels, image, out_path, alpha=0.65):
     """Color-coded overlay of the label map on the source image."""
     n_labels = int(labels.max())
@@ -137,6 +183,12 @@ if __name__ == '__main__':
     parser.add_argument('--min_pixels_in_object', type=int, default=200,
                         help='drop segments with fewer than this many pixels inside the '
                              'coarse mask; they cannot support the loss neighbourhoods')
+    parser.add_argument('--fill_unlabelled', action='store_true',
+                        help='object pixels with no SAM segment join the nearest segment (Tal, 2026-10-07, trial). Off = every run before')
+    parser.add_argument('--merge_below_frac', type=float, default=0.0,
+                        help='segments smaller than this share of the object mask (e.g. 0.007) get no label of '
+                             'their own: each is absorbed by the neighbouring segment with the longest shared '
+                             'border (Tal, 2026-10-06). 0 = off, the behaviour of every run before that date')
     args = parser.parse_args()
 
     image = cv2.imread(args.img_path)
@@ -167,6 +219,16 @@ if __name__ == '__main__':
     print('SAM produced %d raw masks' % len(anns))
 
     labels, counts = build_label_map(anns, coarse_mask, args.min_pixels_in_object)
+
+    if args.merge_below_frac > 0:
+        n_before = len(counts)
+        labels, counts = merge_small_segments(labels, args.merge_below_frac * int(coarse_mask.sum()))
+        print('--merge_below_frac %g: %d segments -> %d' % (args.merge_below_frac, n_before, len(counts)))
+    if args.fill_unlabelled:
+        n_un = int((coarse_mask & (labels == 0)).sum())
+        labels, counts = fill_unlabelled(labels, coarse_mask)
+        print('--fill_unlabelled: %d unlabelled object pixels (%.1f%%) joined their nearest segment'
+              % (n_un, 100.0 * n_un / coarse_mask.sum()))
 
     covered = int((labels > 0).sum())
     in_object = int(coarse_mask.sum())

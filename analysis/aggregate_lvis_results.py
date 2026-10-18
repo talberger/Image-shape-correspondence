@@ -31,6 +31,8 @@ def main():
     ap.add_argument('--expected', type=int, default=132,
                     help='how many instances the full set has, to report coverage')
     ap.add_argument('--out_json', default=None)
+    ap.add_argument('--class_name', default='bear',
+                    help='2026-10-04: the bear reference lines are printed only for bear; other classes print the SHIC reproduction from eval_shic_<cls>/results.json')
     args = ap.parse_args()
 
     paths = sorted(p for p in glob.glob(os.path.join(args.results_dir, 'lvis*.json'))
@@ -71,15 +73,22 @@ def main():
                 'mean_point': float(pts.mean()), 'median_point': float(np.median(pts)),
                 'mean_instance': float(ims.mean()), 'se_instance': se, 'n_points': int(len(pts))}
 
-    print('\nreference (SHIC arXiv 2407.18907 Table 1, bear): SHIC 33.0 | CSE supervised 35.7 | '
-          'zero-shot SD-DINO 48.2')
-    print('reproduced here with SHIC\'s released weights: 33.09')
-    print('NOISE: instance-level SE on the full 132 is 2.44; median 18.7 vs mean 33 (the mean is '
-          'driven by left/right and front/back flips). Treat gaps under ~2.5 as not a result.')
-    if n_inst < args.expected:
-        print(f'WARNING: only {n_inst} of {args.expected} instances present -- this is a PARTIAL '
-              f'number and a random 1/3 subset has a 90% range of 27.3-38.9, so it is not '
-              f'comparable to 33.0 yet.')
+    if args.class_name == 'bear':
+        print('\nreference (SHIC arXiv 2407.18907 Table 1, bear): SHIC 33.0 | CSE supervised 35.7 | '
+              'zero-shot SD-DINO 48.2')
+        print('reproduced here with SHIC\'s released weights: 33.09')
+        print('NOISE: instance-level SE on the full 132 is 2.44; median 18.7 vs mean 33 (the mean is '
+              'driven by left/right and front/back flips). Treat gaps under ~2.5 as not a result.')
+        if n_inst < args.expected:
+            print(f'WARNING: only {n_inst} of {args.expected} instances present -- this is a PARTIAL '
+                  f'number and a random 1/3 subset has a 90% range of 27.3-38.9, so it is not '
+                  f'comparable to 33.0 yet.')
+    else:
+        ref = json.load(open(f'data/densepose_lvis/eval_shic_{args.class_name}/results.json'))
+        print(f'\nSHIC released weights on {args.class_name}, reproduced here (mean/pt): '
+              + ' | '.join(f"{k} {v['mean_point']:.2f}" for k, v in ref.items()))
+        if n_inst < args.expected:
+            print(f'WARNING: only {n_inst} of {args.expected} instances present -- PARTIAL number.')
 
     if args.out_json:
         with open(args.out_json, 'w') as f:

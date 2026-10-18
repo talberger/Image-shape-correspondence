@@ -64,6 +64,591 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
+## STATE AT POD CLOSE — 2026-10-13 (forty-seventh pod, 1x RTX 2000 Ada sm_89 16 GB, same day as pod 46). **NOTHING IS RUNNING.** Tal closes the pod.
+**Thread: FEATURE-AWARE 2D GEODESIC, now on the training's DINO+SD features and in real runs (horse 56069). RESULT: implemented and run; it does NOT fix the nose.**
+- **IMPLEMENTED (default = the original metric, verified unchanged):** `analysis/build_geodesic_tables.py --feature_geodesic BETA POWER --pix_features_path F`
+  (`build_2d_table(feature_cost=...)`: feature step cost chooses the path, table value = the path's PIXEL length via Dijkstra predecessors + `path_pixel_lengths`;
+  the true diameter stays the pixel-metric one). Verified against the path plots (C -> N1 / N2 / N3 = 283.5 / 244.0 / 592.0 px, serial = parallel).
+  Passed on by `scripts/run_lvis_worker.py --feature_geodesic B P [--feature_geodesic_diameter original|path]` and
+  `FEATGEO="B P" [FEATGEO_DIAM=path] bash scripts/debug_twostage_instance.sh` (run / demo dir suffix `_featgeo_b<B>_p<P>[_pathdiam]`).
+  `path` = divide the table by its own longest path (max over the table) instead of the original diameter. Table stage 18 s -> 93-122 s; training unchanged.
+- **RUNS, horse 56069, current recipe (SAM 3 mask, mask in one piece so no amodal, FILLSEG, merge 1.5% -> 4 segments), soft-snap pt1 / pt2 / pt3, mean, 1 seed:**
+  | run | end of stage 1 | final |
+  |---|---|---|
+  | original 2D distance (first current-recipe run of this horse) | 9.4 / 15.3 / 95.1, 39.9 | 7.4 / 15.3 / 95.1, 39.3 |
+  | beta 100 power 8, / 481 | 10.9 / 19.4 / 95.1, 41.8 | 12.6 / 22.4 / 87.8, 40.9 |
+  | beta 100 power 8, / own longest path (1138) | 7.3 / 22.4 / 87.4, 39.0 | 7.3 / 22.4 / 87.4, 39.0 |
+  | beta 10 power 8, / 481 | 4.1 / 16.8 / 87.0, 36.0 | 2.3 / 16.8 / 82.1, 33.7 |
+  | beta 10 power 8, / own longest path (837) | 9.4 / 21.6 / 76.3, 35.8 | 9.4 / 19.3 / 78.8, 35.8 |
+  ZS 6.3 / 24.6 / 0.0, 10.3; SHIC 2.3 / 18.3 / 0.0, 6.9. Old-recipe runs of 10-06 (polygon): final 39.6-39.9, pt 3 94-95.
+  **The nose (pt 3) stays destroyed by stage 1 in every run (76-95).** Beta 10 is better than beta 100 and the only one below the original, by 3-6 points on one
+  instance / one seed = not established. The normalisation was not the problem.
+- **WHY (checked, no training):**
+  - On DINO+SD the paths at beta 10 power 8 are weaker than on DINO (C -> N3 0.69 vs 0.92; no climb through the head); beta 100 power 8 gives the climb (1.23). Tal chose 100 for the runs.
+    The SAM 3 mask gives the same paths as the polygon. The pod-44..46 figures were on the LVIS polygon only because no SAM 3 mask existed; **the method never uses the polygon.**
+  - **The feature metric inflates EVERYTHING, inside a part too.** Training table, norm by 481, beta 100: median all pairs 0.31 -> 0.74, in-segment 0.25 -> 0.50, 33% of pairs above 1;
+    correlation with the 3D geodesic of the ZS-mapped vertices unchanged (0.398 -> 0.393), bias +0.08 -> +0.56. In-segment neighbours 60 px away get paths x2.0-3.5 on average,
+    up to x10 (600 px); beta 10: x1.3-2.7, up to x6.
+  - **Sideways steps cost far more than vertical ones: feature change per step, median, 1.28 left-right vs 0.77 up-down (x1.7; SD half x2.1, DINO half x1.4).** NOT a pipeline
+    bug: the same numbers come out when the features are extracted from the crop rotated 90 deg (1.29 / 0.75), so it belongs to this frontal horse. Power 8 turns x1.7 into x58
+    in cost -> vertical corridors, paths made of long vertical runs. Also visible: the feature map is a 16 x 11 cell grid (~25 px per cell) upsampled, so the cost is blocky.
+  - **"Wall only" threshold (a step above a percentile of the change costs x(1 + beta), the rest plain length): no threshold separates.** Percentile 80-95: in-segment paths stable
+    (x1.04-1.11) but the across-part paths do not change at all (body 0.18) -- the strong-change spots are islands, not a closed head / body line. Percentile 50 and below: body / chest
+    move away and the in-segment paths inflate with them. Best point: percentile 50, beta 100 = in-segment x1.66, C -> N1 0.48, N2 0.42, N3 0.56 (power law beta 10: x1.98, 0.55 / 0.44 / 0.69).
+  - **My conclusion (told to Tal, he has not answered): a cost built from the change between two NEIGHBOURING pixels cannot separate head from body on this horse, at any setting;**
+    the head / body difference shows only over a larger distance.
+- **NEXT POD (Tal continues from here; nothing decided):**
+  1. Proposed and awaiting his answer: the **"feature change over a wider span (14-28 px)" experiment** he asked to be reminded of -- first fix the mask-border artefact
+     (`span_rel`: the span shrinks at the border -> cheap corridor). Today's 28 px run at beta 100 power 8 on DINO+SD: N1 goes up through the head (0.66) but N3 circles the
+     whole horse along the mask border (1.99) = the artefact, not a result.
+  2. Check any new variant FIRST on the in-segment path figure + the across-part column (`plot_2d_paths_in_segment.py`, minutes), only then train (Tal: "this is a good check").
+  3. Still open: 3D geodesics on the mesh for the three pairs (pod 44); bear 159218 as the second example; a cost for crossing a fine-segment boundary (Tal: "not now").
+- **REMIND TAL (he said "you MUST remind me"): HIDDEN (amodal) PIXELS UNDER THE FEATURE GEODESIC.** As coded, a step that touches a hidden pixel costs its plain pixel
+  length (no feature term) -> hidden regions are cheap shortcuts. "Cost of a typical step (1 + beta)" was rejected by Tal.
+  **AGREED FIX, NOT IMPLEMENTED: harmonic interpolation of the FEATURES into the hidden pixels** (each hidden pixel = mean of its neighbours, iterated to convergence,
+  visible pixels at the occluder's rim fixed; mid-fence ~ (x + y) / 2), then the normal feature step cost everywhere. Not needed on horse 56069 (mask in one piece).
+  **The first time an occluded / split-mask instance is run with `--feature_geodesic`, raise this with Tal BEFORE running, implement it and check it.**
+- **The formula, as explained to Tal:** `step cost = length * (1 + beta * (delta / median) ** power)`; the `1` = the plain distance (beta 0 = the original metric; without it a flat
+  region is free); beta sets from which change a step counts as a wall (`beta ** (-1 / power)`: 0.56 of the median at beta 100, 0.75 at beta 10), power how sharp. At beta 100
+  95% of the left-right steps and 69% of the up-down steps are above that threshold.
+- **Figures** (`demo/shic/crowding/horse_lvis56069/`): `lvis56069_pod47_SUMMARY_dinosd.png`, `lvis56069_pod47_ALL_RUNS_dinosd.png` (pod-46 sweep on DINO+SD),
+  `lvis56069_optionA_beta100_power8_span1_28_dinosd.png`, `..._sam3mask_dinosd.png`, `lvis56069_pod47_table_check_nose.png` (distance field from the nose: original / new / 3D target),
+  `lvis56069_pod47_in_segment_paths_beta10_50_100_power8.png`, `lvis56069_pod47_step_direction_check.png`, `lvis56069_pod47_wall_only_paths.png` (+ `_view.jpg`: the PNG is 4.9 MB,
+  too big to send), `lvis56069_pod47_three_runs_backproj_stages.png`, `lvis56069_pod47_beta10_runs_backproj_stages.png`. Features: `features/lvis56069_pix_sdsquare_fuse16.pth`.
+  Run figures: `demo/shic/debug_twostage/horse_lvis56069_merge0.015_amodal_fillseg_sam3mask{,_featgeo_b100_p8,_featgeo_b100_p8_pathdiam,_featgeo_b10_p8,_featgeo_b10_p8_pathdiam}/`.
+- **Disk added (free when Tal agrees):** 5 kept run dirs of horse 56069, ~2 GB each: `data/densepose_lvis/runs_debug_merge0.015_amodal_fillseg_sam3mask/lvis56069` and
+  `runs_debug_merge0.015_amodal_fillseg_sam3mask_featgeo_{b100_p8,b100_p8_pathdiam,b10_p8,b10_p8_pathdiam}/`. Logs + queue scripts `/workspace/logs/pod47_featgeo/`.
+- **Uncommitted in bsb** (last commit 18f350c; Tal did not ask for a commit): everything of pods 38-47. Today: M `analysis/build_geodesic_tables.py`, `scripts/run_lvis_worker.py`,
+  `scripts/debug_twostage_instance.sh` (pre-edit copies `/workspace/archive/*.bak_2026-10-13`), `analysis/plot_2d_crowding_overview.py` (`--features_label`);
+  NEW `analysis/plot_2d_paths_in_segment.py` (`--betas`, `--threshold_percentiles`, `--cross_points`; slow, ~5 min for 5 rows x 6 columns).
+  One-off scripts (table statistics, direction check, threshold sweep) were in the session scratchpad and are gone; their numbers are above.
+  Backups of this file: `/workspace/archive/PROJECT_NOTES_backup_2026-10-13_pod47_{open,close}.md`.
+
+## STATE AT POD CLOSE — 2026-10-13 (forty-sixth pod, CPU only). **NOTHING IS RUNNING, NOTHING WAS TRAINED.** Tal closes the pod.
+**Thread: FEATURE-AWARE 2D GEODESIC for crowded parts (horse 56069, same C / N1 / N2 / N3). DECISION (Tal): go to real experiments with option A, beta 10, power 8.**
+- **The pod-45 open question is answered: Tal meant option A** (cost of a step = dissimilarity between the step's two pixels), and wants the algorithm to
+  prefer a long route through similar pixels over a short one through dissimilar ones. Target behaviour in his words: C -> N3 should go UP through the head and down.
+- **Formula (as coded, `analysis/plot_2d_feature_geodesic_paths.py`):** `step cost(p -> q) = |p - q| * (1 + beta * (delta / median_delta) ** power)`,
+  `delta = 1 - cos(f_p, f_q)`, p and q 8-neighbours. median = units only (delta between neighbours is ~6.5e-4). power = how steep the wall is;
+  beta = from which height a change counts as a wall (threshold `rel0 = beta ** (-1 / power)`).
+- **DISTANCE DEFINITION (Tal approved): the features only CHOOSE the path; the distance is the path's LENGTH IN PIXELS / the ORIGINAL pixel diameter (481.4).**
+  Dividing the cost by the same-metric diameter is broken at power >= 4 (one pixel behind a wall sets the diameter: 1.5e8 at power 8 -> every ratio 0).
+- **Results, frozen DINO-ONLY features (CPU; NOT the training's DINO+SD), path px / 481.4:**
+  | variant | N1 body | N2 forehead | N3 chest |
+  |---|---|---|---|
+  | original (no features) | 0.18 | 0.42 | 0.30 |
+  | A power 1, beta 10 ... 1000 | 0.22 | 0.44-0.52 | 0.37 |
+  | A power 4, beta 10 / 100 / 1000 | 0.24 / 0.63 / 0.65 | 0.52 / 0.53 / 0.54 | 0.56 / 0.59 / 0.98 |
+  | **A power 8, beta 10 (CHOSEN)** | **0.57** | **0.44** | **0.92** |
+  | A power 8, beta 100 / 1000 / 1e6+ | 0.64 / 0.67 / 0.74 | 0.57 / 0.74 / 0.89 | 0.99 / 1.00 / 1.01 |
+  | A beta 10, power 12 / 32 / 256 | 0.53 / 0.52 / 0.50 | 0.44 / 0.43 / 0.43 | 0.91 / 0.85 / 0.82 |
+  | A power 32, beta 1e3 / 1e6 / 1e9 | 0.54 / 0.64 / 0.71 | 0.49 / 0.70 / 1.11 | 1.01 / 1.13 / 1.36 |
+  | B (unlike C) beta 10 power 8 | 0.19 | 0.46 | 0.40 |
+  | A + B, beta 10 power 8 | 0.23 | 0.43 | 0.51 |
+  - Power 1: beta does nothing at any value (no wall: neighbour delta is near uniform, p99 = 5x median; the head/body ridge is only 2-3x).
+  - **Power 8, beta 10: C -> N3 climbs inside the head to eye height and only then crosses (145 -> 445 px); body ends up farther than the forehead.**
+    Tal: "looks good"; "beta 1000 power 4 also fine, maybe a bit less".
+  - Power above 8 at beta 10: saturated. Beta above 10 at power >= 8: the path to the FOREHEAD turns into a maze (walls inside the head) and the paths
+    snap to DINO's 14 px patch grid -> worse. Beta >= 1e6 at power 8: frozen.
+  - **C -> N1 never goes through the head** in any A variant: it drops under the muzzle and comes round from the right (the neck is hidden in this photo).
+  - B and A + B: no good (B makes everything unlike C equally expensive and flattens A's walls). Tal: B "interesting but not the direction".
+  - "Change measured over 7 / 14 / 28 px" (`--delta_spans`): at 28 px N1 DOES climb the head and cross at the shoulder, but N3 hugs the mask border --
+    **an artefact of the implementation** (the span shrinks at the border -> cheap corridor; `span_rel` docstring). NOT conclusive.
+- **NEXT POD (GPU), in this order:**
+  1. **Implement the chosen metric in `build_2d_table` (`analysis/build_geodesic_tables.py`) behind a flag, default = the original metric:** feature step cost
+     (beta 10, power 8), Dijkstra with predecessors, table value = path length in pixels, normalised by the ORIGINAL diameter. Needs the photo features before
+     the table (already the stage order). Estimated cost: only the table stage (16-36 s today) grows, guessed 2-4x, NOT measured; training unchanged.
+  2. Run it for real on horse 56069 (symptom to check: GT pt 3, the nose, ZS 0.0 -> stage 1 95.1) -- first re-render the paths with the training's DINO+SD
+     features (`extract_dino_sd_features.py --sd_frame square_pad --cpu_postprocess`; **the GPU extraction was NOT run this pod**, so beta 10 / power 8 is
+     tuned on DINO only and on ONE centre pixel of ONE horse; bear 159218 is the second example).
+  3. **REMIND TAL (he asked): the "feature change over a wider span (14 px)" experiment** -- fix the mask-border artefact first (e.g. normalise by the span
+     actually measured), then rerun 7 / 14 / 28.
+  4. Later, maybe (Tal: "not now"): a cost for crossing a FINE-SEGMENT boundary. Still open from pod 44: the 3D geodesics on the mesh for the three pairs.
+- **Figures** (`demo/shic/crowding/horse_lvis56069/`): `lvis56069_pod46_SUMMARY_dino.png` (original vs chosen, feature PCA, change map, 4 heatmaps),
+  `lvis56069_pod46_ALL_RUNS_dino.png` (every variant, one row per experiment, chosen framed green), + one `lvis56069_option*_dino.png` per sweep, `lvis56069_setup_dino.png`,
+  `lvis56069_feature_change_map_dino.png`. Rebuild: `analysis/plot_2d_crowding_overview.py` (`--overview_path`, `--summary_path`).
+- Uncommitted in bsb: NEW `analysis/plot_2d_crowding_setup.py`, `plot_2d_feature_change_map.py`, `plot_2d_crowding_overview.py`; CHANGED
+  `plot_2d_feature_geodesic_paths.py` (`--cost_modes step|start|both`, `--delta_spans`, `--similarity_row`, module-level `span_rel`; option B is now / median).
+  Backup of this file before the entry: `/workspace/archive/PROJECT_NOTES_backup_2026-10-13_pod46_close.md`.
+
+## STATE AT POD CLOSE — 2026-10-12 (forty-fifth pod, CPU only, same day as pod 44). **NOTHING IS RUNNING, NOTHING WAS TRAINED.** Tal closes the pod.
+**Thread (Tal's idea): FEATURE-AWARE 2D DISTANCE for the crowded-parts problem** -- the path's cost depends on the features, so head -> body becomes "long".
+- Horse 56069, same C (270, 150) / N1 (250, 230) / N2 (70, 140) / N3 (330, 30) as pod 44.
+  frozen DINO-only features (CPU, NOT the training's DINO+SD), each method divided by its own diameter:
+  | method | N1 body | N2 forehead | N3 chest |
+  |---|---|---|---|
+  | training metric | 0.183 | 0.424 | 0.301 |
+  | 1 feature cost on the 8-direction graph, linear, beta 10 | 0.212 | 0.319 | 0.383 |
+  | 2 fast marching, same cost as a per-pixel field | 0.227 | 0.326 | 0.361 |
+  | 3 Isomap (feature-space kNN, k 8) | 0.236 | 0.399 | 0.361 |
+  | 4 biharmonic (spatial graph, feature affinity) | 0.341 | 0.583 | 0.494 |
+  | 5 spectral (15 eigenvectors) | 0.422 | 0.421 | 0.412 |
+  Only biharmonic shows a head/body boundary (distance only, no path). Squared cost (beta 10: 0.130 / 0.140 / 0.247) pulls everything closer, N1 included.
+  3-5 on a 4 px grid; 4-5 use a 99th-percentile diameter. Method 6 (functional maps) not run: it matches two images, not two pixels of one.
+  Figure (source + methods 1-5, 6 columns): `demo/shic/crowding/horse_lvis56069/lvis56069_feature_distances_methods1to5_dino.png`; the older one with the
+  squared column: `..._all_methods_dino.png`. Script `analysis/compare_2d_feature_distances.py` (`--power 1`), + `analysis/plot_2d_feature_geodesic_paths.py`.
+  `scikit-fmm` 2025.1.29 installed with `--no-deps` (built from source). Still NOT done: the 3D geodesics on the mesh = no target number to compare against.
+- **Tal's verdict: "none of them does what I wanted".** What he described: the feature map decides, and a path that passes through a pixel NOT SIMILAR TO WHERE WE
+  STAND gets more expensive. Methods 1-2 are the closest, but they compare each pixel with the PREVIOUS pixel on the path; DINO features change gradually, so
+  every step is cheap and head -> body costs almost nothing. **My reading (NOT confirmed by Tal): he means dissimilar to the START pixel C**, i.e. per-pixel cost
+  `1 + beta * (1 - cos(f_p, f_C))`. NOT run. Caveats told to him: not symmetric (d(C,N) != d(N,C); could average both directions), and N2 (forehead) may get
+  expensive too if it is unlike the nose.
+- **NEXT:** ask Tal which "where we stand" he means (previous pixel = method 1, done; start pixel C = a few lines on top of the fast-marching column), then run it.
+  Still open from pod 44: the 3D geodesics on the mesh for the three pairs (the target numbers).
+- Uncommitted in bsb: + `analysis/compare_2d_feature_distances.py`, `analysis/plot_2d_feature_geodesic_paths.py` (and pod 44's `analysis/plot_2d_geodesic_paths.py`).
+  Backup of this file before the entry: `/workspace/archive/PROJECT_NOTES_backup_2026-10-12_pod45_close.md`.
+
+## STATE AT POD CLOSE — 2026-10-12 (forty-fourth pod, short morning session). **NOTHING IS RUNNING, NOTHING WAS TRAINED.** Tal closes the pod, continues the same day.
+**New thread (Tal): CROWDED PARTS IN THE IMAGE** -- parts that touch in the 2D mask (head against the body) have a SHORT 2D geodesic while their mesh geodesic is long
+(the 10-07 "parts that merge in the 2D mask" root cause). Tal wants to study it and has several fixes in mind (NOT told yet).
+- **Working example = horse 56069** (Tal: easy to read; GT pt 3, the nose, ZS 0.0 -> stage 1 95.1, is the symptom -> the check after a fix). Bear 159218 is the second example.
+  Horse inputs: `data/densepose_lvis/worst5_crops_2026-10-06/lvis56069/` (crop 271x400, LVIS polygon mask, gt). **No SAM 3 mask / current-recipe run for this horse yet**;
+  its only runs are the old eval recipe (`demo/shic/debug_twostage/horse_lvis56069{,_segonly,_merge0.015_segonly}/`; `runs_debug` was deleted).
+- **Shared language for pixels: Tal gives `(y, x)` = (row, col) on the crop**, read off `demo/shic/crowding/horse_lvis56069/lvis56069_pixel_grid.png`. Confirm by marking them first.
+- **Chosen representative C = (270, 150)** (nose tip) and neighbours N1 (250, 230) body right, N2 (70, 140) forehead, N3 (330, 30) chest left.
+- **2D geodesic paths as the training measures them** (NEW `analysis/plot_2d_geodesic_paths.py`: distance from `build_2d_table` itself with C as the only row, diameter =
+  the `--true_diameter` double sweep, path = Dijkstra predecessors on the same 8-connected graph, length asserted equal to the table value):
+  | pair | geodesic px | Euclidean px | norm_d_2D (/ diameter 481.4) |
+  | C -> N1 | 88.3 | 82.5 | 0.183 |
+  | C -> N2 | 204.1 | 200.2 | 0.424 |
+  | C -> N3 | 144.9 | 134.2 | 0.301 |
+  All three paths are straight lines across the mask (geo / Euclid 1.02-1.08 = the 8-direction grid metric, not a detour): nothing separates head from body.
+  Tal: "about what I expected". Figure `demo/shic/crowding/horse_lvis56069/lvis56069_geodesic_paths_2d.png`. NOT done: the matching 3D geodesics on the mesh.
+- **NEXT (Tal continues from here):** he presents his fix ideas; likely first the 3D side of the same three pairs.
+- Uncommitted in bsb: + `analysis/plot_2d_geodesic_paths.py`. Backup of this file before the entry: `/workspace/archive/PROJECT_NOTES_backup_2026-10-12_pod44_close.md`.
+
+## STATE AT POD CLOSE — 2026-10-11 (forty-third pod, 1x RTX 2000 Ada sm_89 16 GB, 10-10 -> 10-11). **NOTHING IS RUNNING.** Tal closes the pod.
+**Days = full 131-bear eval of the current recipe (done), guitar on the current recipe, best/worst-vs-SHIC figures, related-work check of SHIC's citers.**
+- **FULL BEAR EVAL OF THE CURRENT RECIPE (SAM 3 mask + amodal if split + FILLSEG + merge 1.5% + two-stage), 131/132, soft-snap, mean over instances, 1 seed:**
+  | ZS | end of stage 1 | final | old recipe final (polygon, no merge; `results_twostage`) | SHIC |
+  | 39.3 | 35.0 | 35.1 | 34.9 | 33.1 |
+  new - old +0.18 (SE 0.76; 66 better / 61 worse) | new - SHIC +1.98 (SE 1.43; better on 49/131) | final - stage 1 +0.14 (SE 0.36; 59 / 49; on the 113 multi-segment
+  bears +0.16, SE 0.42) | final - ZS -4.21 (SE 1.36; 83 / 48). **=> the new recipe equals the old one (dropping the LVIS polygon cost nothing); SHIC is not beaten;
+  stage 2 adds nothing; the only gain clear of the noise is ZS -> stage 1.** 18 bears ended with ONE segment (stage 1 only). Bear 42071 FAILED
+  (`asked for 2048 center pixels but only 1488 are eligible`), not scored.
+  Results `data/densepose_lvis/results_full_sam3/` (`aggregate.json`), slim run dirs `runs_full_sam3/` (14 GB), logs `/workspace/logs/lvis_pod43_full/`
+  (`launch.sh` = the resumable command, ids in `/workspace/logs/lvis_pod43_full_bear_ids.txt`). ~5-6.6 min per bear.
+- **SLIM KEEP IS THE WORKER DEFAULT (Tal, 10-10):** after scoring, `run_lvis_worker.py` keeps only the alpha-0.5 `pred_f` of stage 1 + final, the ellipses, masks,
+  segments, crop (~100 MB per bear) and drops the photo features, 2D geodesic table, encoder checkpoints. `--keep_intermediates` = everything, `--delete_run_dir` = nothing.
+  Figures from a slim run, no training: `ANALYSIS_ONLY=1 RUNS_DIR=<runs> OUT_DIR=<dir> CLASS=bear ANN_ID=<id> SAM3=1 AMODAL=1 bash scripts/debug_twostage_instance.sh`
+  (re-extracts the features, removes them again). VERIFIED identical to the original (eval per point + 3 figures byte-identical, bear 38529). It takes ~6 min, about
+  the same as a full rerun (6.4 min): the time is Python start-up on the slow volume (`import torch, open3d, kaolin` 41 s), not training. The gain is that the
+  figures come from the scored run itself. No other alpha can be exported from a slim run.
+- **MASK + FINE-SEGMENT CACHE (Tal, 10-11):** `run_lvis_sam3_batch.sh` reuses SAM 3 / amodal masks from `data/densepose_lvis/mask_cache_sam3/<class>/` (`MASK_CACHE=none` = off)
+  and passes `--fine_seg_cache <cache>/fine_segments` to the worker (key = instance + mask source + merge + fill). Seeded from the full run: 132 SAM 3 masks, 19 amodal,
+  131 fine segments (177 MB). VERIFIED on bears 255 and 3044 (amodal): every per-point number identical to the full run; setup 22 s instead of ~20 min.
+- **THE RUN DIED ONCE IN THE NIGHT** (last result 23:38 UTC, log silent from 01:57, process gone, no traceback, container not restarted; cause unknown) and nobody
+  restarted it for hours: the assistant's watcher lived in a session that had ended. **RULE: a long run gets a DETACHED SUPERVISOR on the pod**
+  (`/workspace/logs/lvis_pod43_full/supervisor.sh`: relaunch if dead or if the log is silent 40 min, max 6 restarts). Stop it when the run ends: an instance that
+  always fails (42071) makes the batch exit 1 and the supervisor relaunch.
+- **RESULTS REPRODUCE ON THE SAME GPU TYPE:** 4 bears rerun here gave exactly the pod-41 numbers (186445 18.0, 6462 89.1, 175661 20.8, 38529 97.4), both RTX 2000 Ada.
+  So the pod-42 differences are A4500 vs 2000 Ada, not run-to-run noise.
+- **GUITAR on the current recipe** (own SAM click mask, segments rebuilt with merge 1.5% + FILLSEG: 17 -> 6; eval v2 AUC snap/argmax/soft, read T=0.01, alpha 0.5, 1 seed):
+  | ZS | 87.7 / 86.2 / 85.7 |
+  | two-stage: end of stage 1 (step 149) | 87.2 / 86.3 / 85.4 |
+  | two-stage: final | 88.2 / 88.7 / 86.7 |
+  | per-segment only (no stage 1, 16 in-segment) | **91.6 / 91.2 / 89.2** |
+  On the guitar the gain is all stage 2, and per-segment-only beats two-stage by ~3 (as on 09-27: 92.1 / 91.5 / 89.5 with 17 segments). Old 09-27 two-stage run
+  along its step checkpoints: stage 1 rises early (step 25-75 ~88.3) and is back at ZS by its end. `scripts/run_guitar_twostage_current.sh` (`MU=aniso` = per-segment only),
+  `analysis/eval_guitar_stage_ladder.py`; demo dirs `demo/guitar/runs/isobbox_prop/bsb_isobbox_sdsquare_mu_{globalthenaniso_sw150,aniso_in16out0}_merge0.015_fillseg_a0.5_phase2/eval/`,
+  `.../stage_ladder_pod43/old_twostage_0927/`. A guitar run is 8.4 min (training 5.2); Tal asked where it can be shortened -- NOT profiled yet.
+- **20-BEAR FIGURES (pod-41 ranking by ours - SHIC):** best 5 = 904 228115 181519 186445 65490; worst 5 = 159218 6462 175661 154652 38529; worst 6-10 = 203312 238826 159225 22063 32412.
+  Combined images + per-bear analysis (back-projection ZS / stage 1 / final, segments + ellipses, training centres) in `demo/shic/debug_twostage/ALL10_bears_pod42/`
+  (`{BEST5,WORST5,WORST6to10}_vs_shic_{summary,backproj_stages}.png`, `worst5_analysis/`, `worst6to10_analysis/`). Tal: "everything behaved as expected".
+  - **Bear 76191 = WRONG GT LABELS in the dataset** (pts 1, 2 labelled on paw soles, drawn on thigh / forearm; our loading verified against the raw json) -> dropped from "best".
+  - **Bear 7954 = the SAM 3 mask is the BACKGROUND, not the bear** (0/3 GT points inside) -> dropped from "worst"; its stage numbers mean nothing.
+- **RELATED WORK (`/workspace/related_work/RELATED_WORK_SEARCH.md`, 10-11 sections):** Tal's criterion for a competitor = input a 2D image + a GIVEN 3D object mesh,
+  output per pixel the matching point on the mesh surface. SHIC is the competitor to beat; BSB is our starting point (Itai's), not a competitor; CSE / CSM are older and weaker,
+  not relevant. Of the 16 SHIC-citing papers none is a new competitor: MorphGS (2601.02716) computes such a map zero-shot (GeoAware-SC features + SHIC-style similarity)
+  but only as a loss for motion transfer, never evaluated -> a baseline recipe, not a competitor; 2606.30058 maps pixels to a CUBE shared by all categories.
+  2024+ citers of CSE / CSM / A-CSM / Universal Canonical Maps: 91 papers, 14 keyword hits, no new competitor. All from abstracts + machine summaries of the full text.
+  Leftovers closed 10-11: the 2 citations missing from Semantic Scholar were found via OpenAlex (18 citing works in total) = a shape-analysis PhD thesis (not our task) and
+  **"Towards more Transferable Architectures for Dense Pose Estimation" (Tarashima, Tagawa, ICIP 2026, DOI 10.1109/icip61757.2026.11629883): the ONE paper NOT resolved**
+  (cites SHIC and CSE, no abstract anywhere, paywalled) -- open it by hand. The 3 entries without an abstract: two look like earlier titles of Morpheus, the third is image
+  representation learning by its title. **Search status: SHIC is the only competitor found; 1 paper unresolved; nothing was read by a person.**
+- **Disk:** deleted with Tal's OK (40 GB): `runs_debug`, `runs_debug_merge0.015{,_amodal,_amodal_sam3mask,_amodal_fillseg}`, `runs_speedtest`, `runs_sub20_sam3`.
+  KEPT `runs/` (11 GB, Sept; holds horse 164135 -- not checked whether the paper figures read it). Could be slimmed: `runs_debug_merge0.015_amodal_fillseg_sam3mask/` 29 GB, `runs_pod42_batch/` 17 GB.
+  An `rm -rf` of run dirs needs Tal's explicit OK in the chat (the permission system blocks it otherwise).
+- **Uncommitted in bsb** (last commit 18f350c; Tal did not ask for a commit): everything of pods 38-43. New/changed here: `scripts/{run_lvis_worker.py,debug_twostage_instance.sh,run_lvis_sam3_batch.sh}`,
+  NEW `scripts/run_guitar_twostage_current.sh`, `analysis/eval_guitar_stage_ladder.py`. Pre-edit copies `/workspace/archive/*.bak_2026-10-1{0,1}`.
+- **NEXT (Tal decides):** what to do given that stage 2 adds nothing on 131 bears and SHIC is not beaten; shorten the run time (one-process analysis; profile the guitar run);
+  bear 42071 (mask < 2048 px); horses on the current recipe not run.
+
+## STATE AT POD CLOSE — 2026-10-09 (forty-second pod, 1x RTX A4500 sm_86 20 GB). **NOTHING IS RUNNING.** Tal closes the pod.
+**Day = remaining figure bears of the 20-bear eval, moved from the per-instance debug script to one batch worker; one-segment fix; found that results differ between pods.**
+- **NEXT:** Tal's verdict on the 10 bears shown; decide what "stage 2 helps" can be claimed given the pod-to-pod table (more seeds / same GPU?); Tal's step experiment
+  (50 steps less per stage); maybe the full 132 bears with the new recipe.
+- **POD OPENING (Tal, 2026-10-09): read the notes, give the 3-4 line summary, ASK. Run nothing** (no env timings, no queue) before he answers.
+- **RESULTS ARE NOT REPRODUCIBLE ACROSS PODS / GPUs** (same code, seed 0; RTX 2000 Ada 10-08 vs A4500 10-09), soft-snap mean of 3 points, stage 1 / final:
+  | bear | 10-08 | 10-09 | stage 1 -> final gain 10-08 | 10-09 |
+  | 7954 | 38.2 / 24.3 | 37.8 / 34.5 | +13.9 | +3.3 |
+  | 228115 | 74.8 / 70.4 | 75.6 / 75.2 | +4.5 | +0.4 |
+  | 238826 | 18.1 / 14.1 | 13.9 / 16.1 | +4.0 | -2.3 |
+  | 904 | 26.7 / 23.2 | 30.7 / 28.2 | +3.6 | +2.5 |
+  | 208166 | 7.5 / 6.3 | 6.7 / 9.6 | +1.2 | -2.9 |
+  | 159218 | 55.2 / 63.8 | 60.2 / 48.2 | -8.6 | +12.0 |
+  The pod-to-pod difference is as large as stage 1 vs final and flips its sign; 228115's ZS also differs on one point (71.2 vs 87.4), so it starts before training
+  (stage not located). A per-instance "stage 2 helps" claim from one run is not supported. On the SAME GPU a rerun is identical (below).
+- **NO WEIGHT MIXING IN THE BATCH WORKER (Tal asked, checked):** 238826 (7th in the batch), 154652 (last), 159218 (first) = identical on every point
+  (ZS / stage 1 / final) to their standalone runs of the same day on the same GPU.
+- **ONE FINE SEGMENT = WHOLE MASK (bear 181519; Tal's decision):** run ONLY stage 1 (steps 1 .. mu_switch_step - 1), all 16 neighbours inside the one segment
+  (= the whole mask with FILLSEG); final = end of stage 1, arm `stageA` = `ours`, json `single_segment_stage1_only: true`. In `scripts/run_lvis_worker.py`
+  (pre-edit copy `/workspace/archive/run_lvis_worker.py.bak_2026-10-09`). 181519: 6 segments (93.7% + five < 1.5%) -> merge -> 1. Result ZS 33.8 -> 12.6 (SHIC 25.0).
+  Figure `demo/shic/debug_twostage/bear_lvis181519_stage1_failure/lvis181519_masks_segments.png`.
+- **GT points outside the SAM 3 mask** (181519: 2 of 3, far-side legs in shadow): scored as usual in `all`; only effect = those pixels are not in the training. Tal: not a problem.
+- **VOLUME STILL SLOW** (`import torch, open3d, kaolin` 82-91 s; 200 small opens 8-11 s; 300 MB read 8.3 MB/s). Training itself is normal (264 s). The debug script
+  (~15 processes per instance) took 20-30 min per bear -> **Tal: use the batch (one worker, models loaded once) and build figures afterwards**:
+  `WORKER_ARGS="--keep_intermediates"` in `run_lvis_sam3_batch.sh`, then `ANALYSIS_ONLY=1 RUNS_DIR=<runs> OUT_DIR=<dir> SAM3=1 AMODAL=1 bash scripts/debug_twostage_instance.sh`.
+  Batch today: 8 bears 3573 s (~7.4 min each incl. 613 s one-time setup; worker 266-460 s each). Analysis-only figures: 10-15 min each on the slow volume.
+  Do NOT run a CPU job next to a training run (a CPU SAM run made phase 2 648 s instead of 264 s).
+- **Runs today:** `data/densepose_lvis/{results,runs}_pod42_batch/` (159218 228115 208166 7954 904 181519 238826 154652; run dirs kept, ~2.2 GB each).
+  Figures: `demo/shic/debug_twostage/bear_lvis<id>_merge0.015_amodal_fillseg_sam3mask[_pod42batch]/` for 76191 65490 (pod 41), 238826 154652 159218 (standalone today),
+  7954 904 228115 208166 181519 (`_pod42batch`). All shown to Tal (summaries + stage back-projections of 159218, 7954, 904); no verdict yet.
+- **Uncommitted in bsb** (last commit 18f350c; Tal did not ask for a commit): everything of pods 38-42. Today only `scripts/run_lvis_worker.py` (one-segment path).
+  Queue scripts/logs: `/workspace/logs/debug_twostage/queue_pod42*.{sh,log}`, `/workspace/logs/lvis_pod42_batch/`.
+- **Disk added today (free when Tal agrees):** `data/densepose_lvis/runs_pod42_batch/` 17 GB (8 kept runs), `runs_debug_merge0.015_amodal_fillseg_sam3mask/` now 14 GB
+  (+ 238826, 154652, 159218 standalone). Deleted with Tal's OK: the partial 208166 run + demo dir of pod 41. The pod-41 "free when Tal agrees" list is untouched.
+- **Open:** which three count as "largest stage 1 -> final gain" given the table above; Tal's step experiment; full 132 bears; `results_sub20_sam3` still has 19 (181519 is only in `results_pod42_batch`).
+
+## STATE AT POD CLOSE — 2026-10-08 (forty-first pod, 1x RTX 2000 Ada sm_89 16 GB). **NOTHING IS RUNNING.** Tal closes the pod.
+**Day = drop the LVIS polygon (object mask from SAM 3), make the end-to-end run fast, first 20-bear eval of the new recipe with stage 1 scored.**
+**READ THIS FIRST:**
+- **RECIPE NOW (all Tal's decisions of today, on top of 10-07):** object mask = **SAM 3, box prompt = the whole bbox crop, NO text, default threshold 0** (no LVIS polygon;
+  LVIS gives only the bbox crop + the GT points) + amodal mask (pix2gestalt) **only when the mask is split** (largest connected part < 95% of the mask) with
+  **a pixel kept if >= 1 of the 3 samples has it** (was 2 of 3) + `FILLSEG` + segment merge 1.5%.
+  - One instance with figures: `CLASS=bear ANN_ID=<id> SAM3=1 AMODAL=1 bash scripts/debug_twostage_instance.sh` -> `demo/shic/debug_twostage/<class>_lvis<id>_merge0.015_amodal_fillseg_sam3mask/`
+    (`AMODAL_FORCE=1` = pix2gestalt even if the mask is in one piece; `MIN_VOTES=2` = the old vote).
+  - Many instances, no figures: `CLASS=bear ANN_IDS="..." RESULTS=data/densepose_lvis/results_X RUNS=data/densepose_lvis/runs_X setsid nohup bash scripts/run_lvis_sam3_batch.sh >> <log> 2>&1 < /dev/null &`
+    (crops -> all SAM 3 masks in one process -> pix2gestalt once for the split ones -> one worker; resumable; masks kept in `$RESULTS/masks/`; the run dirs are DELETED).
+  - `run_lvis_worker.py` defaults are still the old eval: pass `--mask_source sam3 --amodal_mask --amodal_wait 5 --merge_below_frac 0.015 --fill_unlabelled_segments` (the batch script does).
+- **STAGE 1 IS NOW SCORED IN EVERY TWO-STAGE RUN** (Tal: "data I want for the next runs"): the worker saves the end-of-stage-A state and writes arm `stageA`
+  next to `ours` / `zs` in `results_*/lvis<id>.json` (survives the cleanup, goes into `aggregate.json`). `--no_stage1` = off. The old 132-bear eval does NOT have it.
+- **20-BEAR EVAL OF THE NEW RECIPE** (`data/densepose_lvis/results_sub20_sam3/`, subset = `subset20_bear_evenspaced.json`: 20 bears evenly spaced over the 132 sorted by
+  ours - SHIC on the old eval; Tal wanted a set more representative than the pod-36 one; a 5+5+5+5 pick is saved as `subset20_bear_stratified.json` but is 10/10 wins, NOT used).
+  19 scored, 1 failed. Soft-snap, mean over instances, 1 seed:
+  | ZS | end of stage 1 | final | SHIC | old recipe final (polygon, no merge) |
+  | 47.1 | 36.7 | 36.8 | 35.4 | 37.3 |
+  final better than stage 1: 10/19 (1 equal, 8 worse; mean diff +0.11, SE 1.4) | final better than ZS 14/19 | better than SHIC 6/19 (diff +1.3, SE 5.5) | new better than old recipe 12/19.
+  **CONCLUSION SO FAR: the gain is ZS -> stage 1; stage 2 adds nothing on average on these 19** (small gains on most, large losses on a few: 38529 81.8 -> 97.4,
+  159218 55.2 -> 63.8, 159225 18.8 -> 26.0; the other way 7954 38.2 -> 24.3). Dropping the polygon did not hurt (36.8 vs 37.3). Tal wants to SHOW stage 1 -> stage 2 improves: not shown yet.
+  - **181519 FAILED**: `segment 1 has no out-of-segment pixel` -- after merge + FILLSEG one segment covers the whole mask, stage 1 cannot draw "out" neighbours.
+    Proposed (NOT answered): in that case draw all 16 neighbours from the whole mask.
+  - **7954**: 0 of 3 GT points inside the SAM 3 mask (mask = 15% of the crop, score 0.63: probably another object); scored anyway (24.3).
+- **WHERE WE STOPPED:** Tal asked for figures of 6 bears spread best -> worst vs SHIC + the best stage 1 -> final gain: 76191 65490 208166 238826 154652 159218 + 228115 (74.8 -> 70.4;
+  the largest gain is 7954 but its GT is outside the mask). The batch had deleted the run dirs, so each needs a rerun (~8.5 min). DONE: **76191, 65490** (not shown to Tal yet).
+  NOT done: 208166 (killed mid-run, its demo dir is partial -- rerun), 238826, 154652, 159218, 228115. Queue stopped because the volume became very slow (below).
+  Then: Tal's step experiment (50 steps less per stage on a few instances); decide 181519; maybe the full 132 bears with the new recipe (Tal undecided; est. 11-15 h).
+- **SAM 3 SETUP (survives a pod switch):** `/workspace/sam3_repo` (clone of facebookresearch/sam3) with its own conda-forge env `/workspace/sam3_repo/env` (python 3.12, torch 2.8.0+cu128;
+  created with `conda create -p ... -c conda-forge --override-channels`, no ToS prompt), weights in `/workspace/.cache/huggingface` (facebook/sam3 is gated; Tal's token has access).
+  Our files there: `run_box_mask.py` (N images in one call), `run_lvis_box.py`, `run_lvis_box_thresholds.py`. bsb side: `scripts/make_sam3_mask.sh`, `prep_lvis_instance.py --mask_source sam3`.
+  SAM 3 uses its SAM-1-style interactive task (`build_sam3_image_model(enable_inst_interactivity=True)`, `model.predict_inst(state, box=...)`). Tal: NO text prompt, only the image goes in.
+  - Mask quality on 20 instances vs the polygon (`demo/shic/sam_box_mask/`): IoU >= 0.8 on 15/20 with SAM 3 vs 10/20 with SAM 1 (same box). SAM 3 fixes the "selects the background" cases
+    (186445, 51330, 2747). Still fails with two animals of the class in the crop (horse 22240, bear 159481) and on horse 28284. Threshold sweep (-2..2): 0 is best on IoU, -1 keeps more of
+    the animal (recall 0.96) but lets background in; Tal kept 0. SAM 1 thresholds do not fix wrong-object picks either.
+- **AMODAL VOTE 1 OF 3** (`analysis/merge_amodal_mask.py --min_votes`, default now 1): closes thin fence / branch holes (206034 475 -> 4 px) but not rider / saddle holes (no sample fills them),
+  and lets one sample's hallucination in (7107, 7108: a blob under the bear). Figure `demo/shic/amodal_votes_preview/amodal_votes_preview.png` (8 instances). Tal rejected "fill enclosed holes".
+  Completed pixels are for distances only. Only pix2gestalt adds them (the geometric gap fill is a fallback that did not trigger).
+- **SPEED: one occluded instance with figures 15.3 -> 8.5 min (206034), every output bit-identical** (masks, geo table, pred_f stage 1 + final, all numbers):
+  | change | wall s |
+  | morning | ~920 |
+  | amodal in the background + slim pix2gestalt weights (`ckpt/slim_ema.pt`, 5.1 GB, load 80 -> 50 s) + SHIC point cache | 754 |
+  | + `sample_out_segment_neighbors`: the per-segment pool is built once per call (was once per entry) | 616 |
+  | + features extracted while SAM 3 runs | 612 |
+  | + pix2gestalt process started at the very beginning (loads during SAM 3) | 512 |
+  - The sampler was the find: with merge 1.5% one segment is 75-90% of the mask, rejection sampling fails, ~1200 entries/step fell to a loop that rebuilt the pool each time = 45% of a
+    stage-1 step. Training 426 -> 223 s. `analysis/profile_phase2.py` replays a kept run under cProfile. What is left in a step (~0.75 s): backward 0.33, encoder 0.17, soft mapping 0.17,
+    feature indexing 0.10, cycle 0.06 (the cycle was NOT the cost). Loss is flat from ~step 100 of each stage but the features keep drifting (cos vs phase 1 0.85 -> 0.826 over the last 150).
+  - Left: training ~245 s, figures ~130 s (untouched), SAM 3 + prep ~80 s (41 s is imports). Peak GPU 14.5 of 16 GB with the three models up together -- may fail on a larger mask (not tested).
+  - In the batch (no figures) an instance is ~300-356 s. 1 pix2gestalt sample instead of 3 would save ~2 s in a single run (it runs in the background): rejected.
+- **TODAY'S DEBUG RESULTS (new recipe, soft-snap mean, 1 seed):** bear 206034: ZS 30.5, stage 1 25.4, final 24.7, SHIC 19.8 (polygon + amodal 2of3, no FILLSEG: 26.2; SAM 3 same settings: 26.2, identical points).
+  bear 7107: ZS 44.9, stage 1 39.7, final 37.6, SHIC 13.8 (10-07 polygon run: 35.4; pt 2 still ~71).
+- **OLD 132-BEAR EVAL, final vs ZS** (Tal asked): better 79/132 (60%), worse 53; by > 5: 63 vs 33; by > 10: 42 vs 19. Stage 2 vs stage 1 cannot be computed there (not saved).
+- **Why the polygon went** (Tal): SHIC's baseline gets only the bbox crop, no mask, so using the LVIS polygon was information the baseline does not have; also the polygon is rasterised
+  at the original resolution and upscaled nearest -> a blocky rim of non-animal pixels (bear 159218). `FILLSEG` assigns ALL unlabelled mask pixels incl. such a rim (Tal: probably negligible, left as is).
+- **Summaries Tal asked for:** horse 56069 / bear 159218 (stage-1 damage, merged-parts root cause -- unchanged from 10-06/07); occlusion before/after figures
+  `demo/shic/occlusion_summary/occlusion_summary_bear{7107,206034}.png`.
+- **TRAPS:** (1) **THE VOLUME GOT VERY SLOW IN THE EVENING**: ~28 ms per small-file open (4-12 s for 200 files; local disk 0.02 s), repeated reads no faster (no client cache);
+  `import torch, open3d, kaolin` > 5 min instead of ~20 s; the debug script (~15 Python processes per instance) went 8.5 -> 28 min, the one-worker batch was hardly affected. Not our code
+  (same script ran in 512 s in the afternoon). Check with `time python -c "import torch, open3d, kaolin"` before a figure queue. (2) A watcher that greps `ps` for the script name matches
+  itself again -- wait on the PID from `ps -eo pid,args | awk '$2=="bash" && $3=="scripts/..."'`. (3) `realpath` of a relative path AFTER a `cd` in a subshell = wrong dir.
+  (4) The worker's `timings` is a list of tuples, not a dict. (5) Activate the env in every fresh shell (`python3` without it has no matplotlib).
+- **Uncommitted in bsb** (last commit 18f350c; Tal did not ask for a commit): everything of pods 38-41. Today: M `scripts/{run_lvis_worker.py,debug_twostage_instance.sh,make_amodal_mask.sh}`,
+  `analysis/{prep_lvis_instance,prep_amodal_input,merge_amodal_mask,compare_ours_vs_shic_points}.py`, `modules/relational_loss.py`; NEW `scripts/{make_sam3_mask.sh,run_lvis_sam3_batch.sh}`,
+  `analysis/{sam_box_mask_preview,sam_box_threshold_sweep,amodal_votes_preview,profile_phase2}.py`. Outside git: `/workspace/pix2gestalt_repo/run_amodal.py` (slim weights, `--wait_for_input`),
+  `/workspace/sam3_repo/*.py`. Pre-edit copies `/workspace/archive/*.bak_2026-10-08*`.
+- **Disk:** freed 55 GB in the morning (Tal: "delete what you think is safe"): `runs_{horse_,}twostage_examples`, `runs_debug_segonly`, `runs_debug_merge0.015_segonly`, `runs_horse_twostage`.
+  Added: `/workspace/sam3_repo` 9.4 GB + weights ~10 GB in the HF cache (KEEP), `pix2gestalt_repo/.../slim_ema.pt` 5.1 GB (KEEP).
+  Free when Tal agrees: `data/densepose_lvis/runs_debug/` 15 GB, `runs_debug_merge0.015/` 11 GB, `runs_debug_merge0.015_amodal_fillseg_sam3mask/` 11 GB (today's 206034, 7107, 76191, 65490 + partial 208166),
+  `runs_debug_merge0.015_amodal{,_fillseg,_sam3mask}/` 7.8 GB, `runs_speedtest/` 2.2 GB, `runs_sub20_sam3/` 1.6 GB (the failed 181519), `runs/` 11 GB (content not checked), `sambox_preview/`, `amodal_votes_preview/`.
+### Still open from earlier pods
+Merged-parts root cause (bear 159218 / horse 56069): no fix. Stage 2 under occlusion (Tal still thinking). Pod 39: stage 1 drawing all 16 neighbours from the whole mask (now also the 181519 failure).
+Pods 38/39: leg colouring choice, paper 3.4 step 5, cycle ablation, related-work reading. Horses with the new recipe: not run.
+
+## STATE AT POD CLOSE — 2026-10-07 (fortieth pod, 1x RTX 2000 Ada sm_89 16 GB). **NOTHING IS RUNNING.** Tal closes the pod.
+**Day = failure cases of the two-stage method -> found the OCCLUSION BUG, built a fix, first results are good.**
+**(Recipe lines below are superseded by the 2026-10-08 entry above: SAM 3 mask, amodal only if split, 1-of-3 vote.)**
+**READ THIS FIRST (the rest of the section is the detail):**
+- **THE BUG:** with an occluder (fence, branches, rider, harness) the LVIS mask splits into parts and the 2D geodesic table kept only the largest one, so the training
+  saw a fraction of the animal: 13/132 bears and 63/133 horses lose > 5% of the mask (44 horses > 20%).
+- **THE FIX (Tal's spec, implemented, opt-in `AMODAL=1`):** an amodal mask (pix2gestalt, own venv) completes the hidden parts; 2D geodesics run through it in both stages;
+  centres/neighbours come from the visible pixels of ALL parts, never from completed pixels.
+- **RECIPE FOR EVERY DEBUG RUN NOW (all three are Tal's decisions of today):** segment merge 1.5% + unlabelled pixels join the nearest segment (`FILLSEG`, default ON in the
+  debug script since the end of the day, "adopt it for now") + `AMODAL=1` for occluded instances (still opt-in: +~3 min).
+  `CLASS=bear ANN_ID=<id> AMODAL=1 bash scripts/debug_twostage_instance.sh` -> `demo/shic/debug_twostage/<class>_lvis<id>_merge0.015_amodal_fillseg/`.
+  `run_lvis_worker.py` defaults are ALL still off (`--merge_below_frac 0.015 --fill_unlabelled_segments --amodal_mask` must be passed explicitly in an eval/queue).
+- **RESULTS (soft-snap mean, 1 seed):**
+  | bear | ZS | full eval (no merge) | merge 1.5% | + occlusion fix | + fill unlabelled | SHIC |
+  | 7107 | 44.9 | 49.2 | 54.8 | 36.6 | 35.4 | 13.8 |
+  | 206034 | 30.5 | 34.4 | 35.8 | 26.2 | not run | 19.8 |
+  Two instances. First time both end BELOW ZS; still above SHIC (7107 pt 2 stays ~70).
+- **NEXT (Tal: "we continue tomorrow"):** (1) more occluded instances, horses first (5947 22789 22239 2747 22240 51330 already have pix2gestalt test masks);
+  (2) Tal still wants to think about stage 2 under occlusion; (3) rerun the eval with the fix -- NOT done, not asked yet; (4) the merged-parts root cause (below) has no fix yet;
+  (5) run time: amodal adds ~3 min (80 s is loading a 15.5 GB checkpoint -- a slim weights-only file would cut it; not done).
+- **RULE (Tal): EVERY RUN FROM NOW ON USES SEGMENT MERGE 1.5%** (`--merge_below_frac 0.015`; "otherwise there are too many segments, I understand nothing").
+  `scripts/debug_twostage_instance.sh` defaults to it (output dirs end in `_merge0.015`; `MERGE=0` = old recipe). `run_lvis_worker.py`'s default is STILL 0:
+  pass the flag explicitly in any new eval/queue. The full-eval numbers (bear 34.91, horse 22.73) and the worst-10 ranking are WITHOUT merge.
+- **HOW TO DEBUG ONE INSTANCE (~7.7 min here):** `CLASS=bear ANN_ID=<id> setsid nohup bash scripts/debug_twostage_instance.sh >> /workspace/logs/debug_twostage/<name>.log 2>&1 < /dev/null &`
+  -> `demo/shic/debug_twostage/<class>_lvis<id>_merge0.015[_amodal]_fillseg/`: `eval_arms.json` (ZS / stageA / final per point), `summary/SUMMARY_lvis<id>.png` (v2, vs SHIC),
+  `lvis<id>_backproj_stages.png`, `lvis<id>_segments_ellipses.png`, `_segments_one_by_one.png`, `_coarse_mask.png`. What Tal asks to see each time: the per-point table
+  (ZS / stage 1 / final / SHIC) + ellipses + back-projection per stage + summary. Run instances one after another, not in parallel (one GPU).
+  Options: `MERGE=`, `SEGONLY=1`, `AMODAL=1`, `FILLSEG=0`, `ANALYSIS_ONLY=1` (redo the analysis on a kept run, no training), `OUT_DIR=`, `RUNS_DIR=`.
+  Raw-label check on the original image: `python analysis/lvis_label_check.py --ann_id <id> --class_name <cls> --output_path <png>`.
+- **ROOT CAUSE of bear 159218 / horse 56069 (Tal's conclusion): PARTS THAT MERGE IN THE 2D MASK.** The method is anchored on the 2D image and forces the 3D
+  relations to equal the 2D ones. When two parts touch/overlap in the image (head lying against the belly), their 2D geodesic is SHORT, so the loss pulls the mesh
+  head and belly together although their true 3D geodesic is long. Hence the damage in stage 1, and merge / segonly cannot fix it. Understood; NO FIX CHOSEN YET.
+- **Bear 237843 = suspected WRONG GT LABEL** (Tal spotted it): the 3 label pixels look like HIND legs, dp_vertex 3128 / 530 / 787 are FRONT-leg vertices (z 0.24-0.35, head is +z).
+  Verified it is not our indexing (same annotation + same list index for pixel and vertex, ref_model bear_4936 = our 4936-vertex mesh, single annotation in the image;
+  the same code gives 0.0 errors elsewhere). NOT certain the annotator is wrong -- "hind legs" is a by-eye call on an ambiguous pose.
+  `demo/shic/debug_twostage/bear_lvis237843/lvis237843_label_check.png`. The other worst cases were NOT checked for label errors.
+- **Results today** (soft-snap mean over the 3 points, 1 seed; reruns are bit-reproducible on this pod):
+  | bear | segments | ZS | stage 1 | final | SHIC | what breaks |
+  | 237843 no merge | 16 | 115.3 | 90.1 | 87.9 | 44.4 | suspected label error |
+  | 237843 merge 1.5% | 7 | 115.3 | 91.7 | 82.8 | 44.4 | |
+  | 7107 no merge | 23 | 44.9 | 48.7 | 49.9 | 13.8 | pt 2 wrong from ZS (104.2 -> 92.4); pt 1 pushed away in stage 1 (7.8 -> 32.2) |
+  | 7107 merge 1.5% | 6 | 44.9 | 54.7 | 54.8 | 13.8 | pt 2 104.2 -> 113.8 |
+  | 206034 merge 1.5% | 2 | 30.5 | 32.4 | 35.8 | 19.8 | pt 2 28.0 -> 42.6 -> 47.0 (training worse than ZS) |
+  Tal has NOT yet given a verdict on 7107 / 206034. ZS-only summaries (v2 layout, "ours" = ZS): `demo/shic/debug_twostage/{bear_lvis159218,horse_lvis56069}/summary_zs/`.
+- **OCCLUDED MASKS: THE 2D GEODESIC TABLE KEEPS ONLY THE LARGEST CONNECTED PART OF THE MASK** (`build_geodesic_tables.py::largest_connected_component`, written 09-03 for
+  stray SAM specks). With an occluder (fence, branches) the LVIS polygon mask splits into big parts and the training sees one of them:
+  | bear | mask parts | share of the mask in the table | GT points inside it |
+  | 206034 (fence) | 7 | 37.5% (26116 / 69551 px) | 1 of 3 |
+  | 7107 (branches) | 11 | 34.3% (14395 / 41913 px) | 0 of 3 |
+  | 237843 | - | 98.1% | 3 of 3 |
+  **Tal: this is a BUG. Wanted: train stage 1 AND stage 2 "as if the occluder is not there"** -- 2D geodesics may cross the occluder, every part/segment talks to the others;
+  occluder pixels are used for distances only, never as centres/neighbours (Tal agreed) and never in the back-projection. Stage 2 details: Tal still thinking. NOTHING WIRED INTO TRAINING YET.
+  **How big (survey of every evaluated instance, `demo/shic/occlusion_gapfill/survey_{bear,horse}.json`):**
+  | class | instances | training sees < 95% of the mask | < 80% | < 50% | GT points outside the seen part |
+  | bear | 132 | 13 | 7 | 3 | 15 / 393 |
+  | horse | 133 | 63 | 44 | 13 | 57 / 390 |  (riders, harness, saddles)
+  **Geometric gap fill prototype** (`analysis/gapfill_preview.py::gap_fill`: growing closing radius, keep added blobs that join >= 2 parts, then same-radius closing + enclosed holes
+  touching the fill; one-part masks unchanged): joins thin occluders (fence, straps, branches) but FAILS on wide ones (horse 2747 53% connected, 22240 36%, rider/baskets)
+  and still leaves some interior holes (bear 7108). Figures `demo/shic/occlusion_gapfill/gapfill_survey_{bear,horse}.png`, `gapfill_preview_bears_206034_7107.png`.
+  Tal asked for a GENERIC solution and suggested a model (amodal segmentation); RUNTIME matters to him: prefers simple + fast over best. SAM / SAM 2 / SAM 3 are modal only.
+  Candidates checked 2026-10-07 (papers' text + GitHub repo search by name; a repo under another name could have been missed):
+  | model | paper | code found |
+  | Amodal SAM (SAM + adapter; Tal liked it) | arXiv 2604.20748, Apr 2026 | NO link in the paper, no repo found |
+  | SAMEO (EfficientSAM decoder fine-tuned, box prompt) | arXiv 2503.06261, CVPR 2025 | NO |
+  | SAMBA "Towards Efficient Foundation Model for Zero-shot Amodal Seg." | CVPR 2025 | paper says "will be released"; no repo found |
+  | Tuning-free amodal via inpainting | arXiv 2503.18947 | uses FLUX inpainting through diffusers -- heavy |
+  | pix2gestalt | arXiv 2401.14398, CVPR 2024 | YES `cvlab-columbia/pix2gestalt` -- diffusion, slow, needs its own env |
+  Fine segments already cross the occluder (206034 seg 1 spans all 7 parts).
+  **pix2gestalt TESTED on 10 occluded instances (Tal: "check if it is worth investing"), separate env, bsb env untouched:**
+  bears 7107 7108 206034 90357, horses 5947 22789 22239 2747 22240 51330. Figures `/workspace/pix2gestalt_repo/lvis_test/out_steps50/pix2gestalt_test_{1,2}.png`, `summary.json`.
+  - Result: it completes the hidden body plausibly where the geometric fill cannot (baskets 2747, harness 22240, rider 51330, fence 206034): 7 of 10 are 100% connected in all
+    3 samples; 22239 77/77/97%, 22240 94-96%, 22789 90-91%. Weak spots: the mask is a threshold on the WHITE background of the synthesized image, so white straps / a white
+    horse (22240) leave holes; samples differ from each other (7107 area x1.8-2.1). Tal has NOT judged the figures yet.
+  - Cost: model load 80 s, then 6.7 s per sample at 50 DDIM steps (their default is 200), 5.5 GB GPU. Input/output are 256x256.
+  - Setup: repo `/workspace/pix2gestalt_repo` (clone of cvlab-columbia/pix2gestalt), venv `/workspace/pix2gestalt_repo/venv` (python 3.9 from the bsb env, torch 1.12.1+cu113;
+    a venv because `conda create` asks to accept the Anaconda ToS), weights `pix2gestalt/ckpt/epoch=000005.ckpt` (15.5 GB), `setup_env.sh`, `stubs/` (carvekit stub).
+    Run: `cd /workspace/pix2gestalt_repo/pix2gestalt && source ../venv/bin/activate && PYTHONPATH=../stubs:taming-transformers:CLIP python ../run_lvis_test.py --steps 50 --n_samples 3`,
+    figure: `python /workspace/pix2gestalt_repo/make_test_figure.py --out_dir .../out_steps50` (bsb env). Inputs are built in the bsb env (snippet not saved as a script).
+  - TRAPS: their loader puts the whole 15.5 GB checkpoint on the GPU (OOM on 16 GB) -> load on CPU; `ema_scope()` clones the UNet per call (OOM) -> copy the EMA weights in once
+    and delete `model_ema` (then 5.2 GB). Their README says the demo needs 22-28 GB; with these two fixes 16 GB is plenty. albumentations 0.4.3 does not build (not needed).
+- **OCCLUSION FIX IMPLEMENTED (Tal's spec) + FIRST RESULTS.** 2D geodesics are measured through an AMODAL mask (visible + completed hidden parts), in stage 1 and stage 2;
+  centres / neighbours come from the VISIBLE pixels of ALL parts and never from completed pixels (Tal confirmed this is what he meant). The coarse mask file itself is
+  unchanged (so fine segments, back-projection, eval are identical); the amodal mask is a second file used for distances only.
+  | bear (merge 1.5%, soft-snap, 1 seed) | training saw | ZS | stage 1 | final | SHIC |
+  | 7107 before | 34% of the mask | 44.9 | 54.7 | 54.8 | 13.8 |
+  | 7107 amodal | 100% | 44.9 | 36.6 | 36.6 | 13.8 |  (pt 2: 113.8 -> 69.8)
+  | 206034 before | 38% | 30.5 | 32.4 | 35.8 | 19.8 |
+  | 206034 amodal | 100% | 30.5 | 29.4 | 26.2 | 19.8 |  (pt 2: 47.0 -> 24.7)
+  Two instances only; Tal has not judged the figures yet. Outputs `demo/shic/debug_twostage/bear_lvis{7107,206034}_merge0.015_amodal/` (+ `lvis<id>_training_centres.png`).
+  - Run: `CLASS=bear ANN_ID=<id> AMODAL=1 bash scripts/debug_twostage_instance.sh` (dirs end in `_amodal`). Cost: +~3 min for the mask (80 s model load, 30 s sampling, 2 preps)
+    and phase-2 is slower when much more of the mask is trained (206034: 282 -> 444 s; 7107: 212 -> 201 s).
+  - Mask recipe (Tal OK'd "start like this"): pix2gestalt, 3 samples x 50 steps, fixed seed 0, pixel kept if in >= 2 of 3 samples, visible mask always kept,
+    geometric `gap_fill` only if still disconnected (was not needed on either bear). `scripts/make_amodal_mask.sh` = `analysis/prep_amodal_input.py` (bsb) ->
+    `/workspace/pix2gestalt_repo/run_amodal.py` (venv) -> `analysis/merge_amodal_mask.py` (bsb) => `<run dir>/lvis<id>_amodal_mask.pth` (+ `_amodal_stats.json`, `.png`).
+  - Code: `analysis/build_geodesic_tables.py --geodesic_domain_mask_path` (`occlusion_domain`, `restrict_table_to_visible`; the table keeps columns for visible pixels only,
+    so the training sees an ordinary table; the true diameter is between visible pixels), `phase2/train_relational_loss.py --geodesic_domain_mask_path`,
+    `scripts/run_lvis_worker.py --amodal_mask`. Without the flags nothing changes -- VERIFIED: bear 7107 merge 1.5% rerun on the new code = identical geodesic table, pred_f, all numbers and all 14 figures.
+  - **OPEN, Tal flagged it as wrong: visible pixels with NO FINE SEGMENT get no centres** (7107: 28.9% of the mask, 206034: 6.4%; SAM's automatic masks do not cover them; same
+    with and without merge). Proposed, NOT answered: every unlabelled mask pixel joins the nearest segment. Conflicts with his 10-06 "the unlabelled rim is not part of the animal"
+    (that was about a 3-5% rim). Figure `demo/shic/debug_twostage/bear_lvis7107_merge0.015_amodal/lvis7107_unlabelled_pixels.png`.
+    TRIAL run (Tal: "try one and see if it matters"): `FILLSEG=1` -> `run_lvis_worker.py --fill_unlabelled_segments` -> `build_fine_segments.py --fill_unlabelled` (opt-in, off by default).
+    Bear 7107, merge 1.5% + amodal: final 36.6 -> 35.4 with the fill (pt 1 26.4 -> 21.6, pt 2 69.8 -> 70.8, pt 3 13.7 = 13.7); coverage 71.1% -> 100%. Small effect on this one
+    instance. **ADOPTED by Tal "for now" (end of 10-07): `FILLSEG` defaults to 1 in the debug script; `FILLSEG=0` turns it off.** Output `demo/shic/debug_twostage/bear_lvis7107_merge0.015_amodal_fillseg/`.
+  - Open: Tal still wants to think about stage 2; the full eval was NOT rerun with the fix (63/133 horses, 13/132 bears affected).
+- **Worst 10 per class by (ours - SHIC)**, largest gap first (132 bears / 133 horses): `demo/shic/worst10_vs_shic/worst10_{bear,horse}.png` (crops + GT points).
+  Bear: 159218(done) 237843(done) 7107(done) 230979 159481 7108 159486 6462 38528 31383. Also done: 206034 (Tal's pick, from the pod-38 list).
+  Horse: 28284 6054 7995 56069(done) 57711 181055 28321 58504 2132 37278.
+- **DEBUG RUN SPEED-UP (Tal approved; outputs verified IDENTICAL -- every number and all 14 figures pixel-for-pixel): 856 s -> 460 s per instance.**
+  Cause: every Python process pays ~15-23 s of imports from the network volume (torch 5, kaolin 8, open3d 10) and the analysis launched 17 of them.
+  - `modules/utils.py`, `modules/mesh.py`: open3d imported lazily (helps every script, the eval worker too).
+  - `scripts/make_lvis_arm_summary.sh`: 3 chains in parallel; the old `<tag>_mesh_views.png` render dropped (v2 does not use it); no re-activation;
+    `KEEP_PLAIN=1`, `PRECOMPUTED=1` (both only set by the debug script).
+  - `scripts/debug_twostage_instance.sh`: chains in parallel; position colours + ZS + SHIC are built WHILE phase-2 trains; final/SHIC back-projection computed once.
+  - Only the end-of-stage-1 + final checkpoints are kept (Tal: stage 1 must stay): `run_lvis_worker.py --stage1_checkpoint` -> train `--save_stageA_end`.
+    The 12 step dumps are gone (3.2 -> 1.5 GB per run); `--step_checkpoints` still gives them if a step-progression figure is wanted.
+  - Where the 460 s go now: startup ~40, segments 33, features 54, phase-2 212, analysis after training 110 (`compare_ours_vs_shic_points.py` 61 s -- it re-runs SHIC --
+    then `render_lvis_markers_2d.py` 34 s). ~40 s more is possible there; below ~7 min needs a faster GPU.
+  - **DROPPED (Tal): copying the conda env / weights to the pod's local disk.** One partial test: open3d alone on local disk imports in 15.1-15.9 s vs 15.8 s
+    from the network (its dependencies stayed on the network). Env 17 GB + weight caches 12.7 GB vs 29 GB free locally. Do not re-propose without a full-env test.
+- **Uncommitted in bsb** (last commit 18f350c; Tal was told, did not ask for a commit): the pod-38/39 lists + M `modules/{utils,mesh}.py`, `phase2/train_relational_loss.py`,
+  `analysis/{build_geodesic_tables,build_fine_segments}.py`, `scripts/{run_lvis_worker.py,make_lvis_arm_summary.sh}`;
+  NEW `analysis/{lvis_label_check,plot_training_centres,gapfill_preview,prep_amodal_input,merge_amodal_mask}.py`, `scripts/make_amodal_mask.sh`.
+  Pre-edit copies `/workspace/archive/*.bak_2026-10-07` (`b`, `c` = later states of the same day). `/workspace/pix2gestalt_repo` is NOT in git (our files there:
+  `setup_env.sh`, `run_amodal.py`, `run_lvis_test.py`, `make_test_figure.py`, `stubs/`, `lvis_test/`).
+- **Disk added today (45 GB):** `/workspace/pix2gestalt_repo` 22 GB (15.5 GB checkpoint + venv -- KEEP, it is the amodal step); run dirs, free when Tal agrees:
+  `data/densepose_lvis/runs_debug/lvis{237843,7107}` (6.9 GB), `runs_debug_merge0.015/` (11 GB), `runs_debug_merge0.015_amodal/` (3.9 GB), `runs_debug_merge0.015_amodal_fillseg/` (1.7 GB).
+  The pod-38/39 lists below are still not deleted.
+### Still open from earlier pods
+Worst-10 list: Tal was going down it by gap vs SHIC (bears 230979 159481 7108 ... not run). Pod 39: stage 1 drawing all 16 neighbours from the whole mask (not answered).
+Pods 38/39: leg colouring choice, paper 3.4 step 5, cycle ablation, related-work reading.
+
+## STATE AT POD CLOSE — 2026-10-06 (thirty-ninth pod, 1x RTX A4500 sm_86 20 GB). **NOTHING IS RUNNING.** Tal closes the pod.
+**Day = debugging failure cases of the two-stage method (Tal reviews the results himself, continues tomorrow).**
+- **Bear 159218 and horse 56069: the damage is done in STAGE 1** (global ellipse) and stage 2 barely changes it. Horse 184389: stage 1 improves the mean but already pushes pt 1 the wrong way. Soft-snap, mean over the instance's 3 points, 1 seed each:
+  | instance | ZS | after stage 1 | final | SHIC | what breaks |
+  | horse 184389 | 16.7 | 11.3 | 12.5 (scored 13.1) | 9.2 | pt 1 (front leg): 10.8 -> 14.9 -> 20.1 |
+  | bear 159218 | 44.8 | 72.8 | 71.7 (scored 78.5) | 14.3 | pt 1: 12.9 -> 85.0; pt 3: 0.0 -> 76.4 |
+  | horse 56069 | 10.3 | 41.4 | 39.9 (scored 40.2) | 6.9 | pt 3: 0.0 -> 95.1, never recovered |
+- **Two recipe options added, both OFF by default (existing evals unchanged):**
+  - `--merge_below_frac F` (`analysis/build_fine_segments.py`, passed by `run_lvis_worker.py`): a segment under F of the mask is absorbed by the
+    neighbouring NON-small segment with the longest shared border. Tal: 0.007 first, then 0.015.
+  - `--out_neighbors_segmented_only` (train + worker): out-of-segment neighbours are never drawn from mask pixels with no fine segment
+    (the 3-5% rim SAM leaves unlabelled). Tal: "the rim is not part of the animal". Centres never came from there.
+  | final mean | eval recipe | no rim | no rim + merge 1.5% | SHIC |
+  | bear 159218 | 71.7 | 52.9 | 56.3 | 14.3 |
+  | horse 56069 | 39.9 | 39.9 | 39.6 | 6.9 |
+  Horse 184389 with merge 0.7% only (9 -> 2 segments): 12.9 vs 12.5. Neither option fixes the stage-1 damage.
+- **How stage 1 really samples (verified in code + files):** ONE ellipse for all pairs (per-segment rows still 1.0/1.0 at the switch), but neighbours are
+  8 from the centre's FINE segment + 8 from outside it, and centres are only pixels with a fine segment. When one segment is 75-87% of the mask,
+  the 8 "out" neighbours of most centres come from the remaining 13-25% only. Tal was asked whether stage 1 should draw all 16 from the whole mask -- NOT answered.
+- **Horse 184389 front leg** (`analysis/diag_seg_mapping.py --box 162 297 225 296`): leg pixels landing on the mesh leg 61% (ZS) -> 27% -> 6%;
+  the whole leg slides UP onto shoulder/chest, same (correct) side. Both front legs are ONE blob in the mask. Hypothesis (untested): the double-width
+  2D leg does not fit the thin mesh leg and slides to the wider region. Tal: maybe SAM3 separates the legs (needs its own env, torch 1.12 here).
+- **Worst 5 per class by (ours - SHIC)**, from all 132 bears / 133 horses: bear 159218 237843 7107 230979 159481; horse 28284 6054 7995 56069 57711.
+  Crops `bsb/demo/shic/worst5_vs_shic/worst5_{bear,horse}.png`.
+- **TRAPS found today:** (1) phase-2 must be launched as `phase2/train_relational_loss_l2norm.py`; plain `train_relational_loss.py` fails the resume gate
+  (cos 0.839). (2) A matplotlib side view of the mesh must use screen-x = -side*z, else it is MIRRORED and shows the other flank's colours
+  (cost one wrong conclusion). Horse mesh: x- = the horse's RIGHT side. (3) Two debug instances in parallel on one GPU = no time saved (~20 min).
+### NEXT POD (Tal decides after reviewing)
+1. Why stage 1 destroys points that ZS had right (horse 56069 pt 3, bear 159218 pt 1/3). Open question above: 16 neighbours from the whole mask in stage 1?
+2. Leg colouring: Tal has not picked between the three (`analysis/leg_colorings.py`: legs4 / legbands / shicstyle).
+3. Still open from pod 38: paper 3.4 step 5, cycle ablation, related-work reading (`/workspace/related_work/RELATED_WORK_SEARCH.md`).
+- **Tools (new):** `scripts/debug_twostage_instance.sh` (`CLASS= ANN_ID= [MERGE=0.015] [SEGONLY=1]`, ~9 min: rerun with step checkpoints + stage-1 snapshot,
+  eval ZS / stage 1 / final, v2 summary vs SHIC, figures) -> `bsb/demo/shic/debug_twostage/<class>_lvis<id>[_merge..][_segonly]/`;
+  `analysis/debug_twostage_instance.py`, `analysis/leg_colorings.py`, `analysis/diag_region_on_mesh.py`.
+  `train_relational_loss.py` saves `encoder_checkpoint_stageA_end.pth` + `mu_aniso_stageA_end.pth` when step checkpoints are on (`run_lvis_worker.py --step_checkpoints`).
+  Horse 184389 figures: `bsb/demo/shic/horse_lvis_vs_shic_twostage/debug_lvis184389/`. Logs `/workspace/logs/debug_lvis184389/`, `/workspace/logs/debug_twostage/`.
+- **Uncommitted in bsb** (last commit 18f350c): pod-38 list + M `analysis/build_fine_segments.py`, `modules/relational_loss.py`;
+  NEW `analysis/{debug_twostage_instance,diag_region_on_mesh,leg_colorings}.py`, `scripts/debug_twostage_instance.sh`. Pre-edit copies `archive/*.bak_2026-10-06`.
+- **Disk to free when Tal agrees (27 GB new today):** `data/densepose_lvis/runs_debug{,_segonly,_merge0.015_segonly}/` (7.6 GB each),
+  `runs_horse_twostage_examples/lvis184389/debug_2026-10-06/` (4.3 GB). Plus the pod-38 list below (still not deleted).
+
+## STATE AT POD CLOSE — 2026-10-05 (thirty-eighth pod, 1x RTX 2000 Ada sm_89 16 GB, 10-04 -> 10-05). **NOTHING IS RUNNING.** Tal closes the pod.
+**The two days in one list** (details: the section just below):
+- **PAPER is in git:** `/workspace/DISC` = clone of `itailang/DISC` (linked to Itai's Overleaf). Pushed b5f111b (method draft v3) and a11109a (Fig. 1: input = image only; mask + parts come out of the SAM box). Tal pulls into Overleaf.
+  Mask facts for the text: demos = SAM with a click; LVIS eval = the dataset polygon (SAM only for parts); SHIC is run on the bbox without a mask -> say so in the experiments section.
+- **BEAR full eval 132/132, two-stage learned (soft-snap): ours 34.91 | SHIC 32.95 | dir per-seg 33.03 | iso 34.81 | ZS 39.26.** Not better than SHIC or than directional per-seg; the 20-bear 30.50 did not hold.
+- **HORSE eval stopped at 133/458 (Tal): ours 22.73 | SHIC 22.60 | ZS 24.09.** Not a random sample.
+- **10 example figures per class in the approved v2 layout** (rule in "How Tal wants the assistant to work"): bear `demo/shic/lvis_vs_shic_twostage/v2/` (+ `ALL10_bears.png`), horse `demo/shic/horse_lvis_vs_shic_twostage/` (+ `ALL10_horses.png`).
+- **Related-work search opened, not finished:** `/workspace/related_work/RELATED_WORK_SEARCH.md`.
+- Tal's table preference (10-05): method + mean error only (soft-snap); no "ours minus it (SE)" / "better on" columns, no argmax, unless asked.
+### NEXT POD (Tal, 2026-10-05): study the examples that did NOT work, bears and horses
+1. Failure cases to start from. Bear: 159218 (78.5 vs SHIC 14.3, low-res teddy, face points, fragmented back-projection), 55342 (78.2 vs 63.7), 206034 (34.4 vs 19.8), 212408 (19.3 vs 8.9).
+   Horse: 181055 (39.3 vs 8.5; one point on the wrong hind leg, looks like a left/right swap), 79982 (26.5 vs 9.9), 195553 (14.4 vs 7.6).
+   Their intermediates are KEPT (features, pred_f, segments): `data/densepose_lvis/runs_twostage_examples/` (19 GB) and `runs_horse_twostage_examples/` (16 GB) -> any analysis can run without retraining.
+   Per-instance scores for picking more failures: `results_twostage/lvis*.json`, `results_horse_twostage/lvis*.json`; SHIC per instance in `eval_shic_<cls>/results.json` (`bbox.per_instance`).
+2. Paper: 3.4 walk-through step 5 still open; cycle ablation; the related-work reading.
+3. texlive is per pod: `apt-get install` line as on pod 37 (~5 min), log `logs/texlive_install_pod38.log`. Compile in `/workspace/DISC` with `latexmk -pdf main.tex`.
+- **Uncommitted in bsb** (last commit 18f350c): M `analysis/{aggregate_lvis_results,make_lvis_summary_figure}.py`, `phase2/train_relational_loss.py`, `scripts/{make_lvis_arm_summary,run_shicbear_mu_lora}.sh`, `scripts/run_lvis_worker.py`;
+  NEW `analysis/{paper_fig_horse,render_lvis_markers_2d}.py`, `scripts/run_lvis_class_queue.sh`. `/workspace/DISC` is clean and pushed. `/workspace/paper` is the OLD copy (superseded by DISC).
+- Disk to free when Tal agrees: the two `*_examples` run dirs (35 GB) and `runs_horse_twostage/` (1.6 GB of interrupted leftovers).
+
+## 2026-10-04 / 10-05 (thirty-eighth pod) -- details
+- **PAPER IS NOW IN GIT: `git@github.com:itailang/DISC.git` (Itai's repo, linked to his Overleaf project), clone at `/workspace/DISC`** -- this REPLACES `/workspace/paper` as the working copy.
+  Tal's key (`talberger`) has push access. Pushed b5f111b (method draft v3: main/macros/preamble/cvpr.sty/bst/bib, `sec/*.tex`, `fig/*.{tex,pdf}`, `.gitignore`) on top of Itai's f8d2666; Tal pulled it into Overleaf and it compiles.
+  Sync is MANUAL both ways: Overleaf "Push Overleaf changes to GitHub" -> `git pull` here -> edit -> push `main` -> Overleaf "Pull GitHub changes". Always pull before editing (Itai may have edited).
+- **FULL 132-BEAR EVAL of the two-stage learned method (Tal)**, started 14:30 UTC, 1 worker, detached:
+  `NUM_GPUS=1 RESULTS=data/densepose_lvis/results_twostage LOGDIR=/workspace/logs/lvis_full_twostage WORKER_ARGS="--mu_scope global_then_segment_aniso --mu_switch_step 150 --mu_lr 5e-2 --runs_dir data/densepose_lvis/runs_twostage" bash scripts/run_lvis_queue.sh`
+  (launch with `setsid nohup ... > /workspace/logs/lvis_full_twostage/queue.log`). RESUMABLE: relaunch the same line, scored bears are skipped. 50/132 at 17:06 UTC, 0 errors.
+  - The 20 scores of `results_sub20_twostage` were COPIED in (not rescored). mu_lr of that run was not recorded; a smoke test on 113202 with 5e-2 reproduced its step-25 log line to 3 digits -> 5e-2.
+    Same bear, same seed, other GPU: final 21.2 here vs 19.1 there -> cross-pod run-to-run noise of ~2 on one bear.
+  - **10 example bears** (random seed 0 from the unscored ones: 212408 206043 206034 181519 175388 167910 163066 159218 154548 55342) run by a 2nd worker with `--keep_intermediates`
+    (`data/densepose_lvis/runs_twostage_examples/`, ~2 GB each, delete when done) INTO the same results dir. 2 workers on the 16 GB GPU: no OOM, but ~10 min/bear each instead of 5.
+    Figures `demo/shic/lvis_vs_shic_twostage/SUMMARY_lvis<id>.png` (all shown to Tal). On these 10: ours soft 37.1 vs SHIC 33.8, 5/5; bear 159218 (low-res teddy, face points) = 78.5 vs 14.3.
+  - `scripts/make_lvis_arm_summary.sh` now takes `RUNS=<runs dir>` (default unchanged) and passes `--run_dir`; pre-edit copy `archive/make_lvis_arm_summary.sh.bak_2026-10-04`.
+- **FULL HORSE EVAL (Tal), chained to start when the bear queue exits:** `/workspace/logs/lvis_horse_twostage/chain_after_bear.sh` (the env line inside it is the resume command).
+  **458 horses / 1337 pts, ~44 h on one GPU** (Tal told; alternatives offered: fixed subset, multi-GPU pod). Results `data/densepose_lvis/results_horse_twostage/`, logs `/workspace/logs/lvis_horse_twostage/`.
+  SHIC horse reproduced 23.08. Smoke test horse 164135: soft 6.37 / argmax 7.47 / ZS 13.29 (identical to the 09-29 numbers).
+  Code: `run_lvis_worker.py --class_name`, `aggregate_lvis_results.py --class_name`, NEW `scripts/run_lvis_class_queue.sh` (CLASS=...). Pre-edit copies `archive/*.bak_2026-10-04`.
+  **TRAP: never edit a queue .sh while it is running -- bash reads it by byte offset** (run_lvis_queue.sh was edited mid-run, restored byte-identical before its `wait` returned).
+- **BEAR FINAL 132/132 (two-stage learned, soft-snap, mean over instances): ours 34.91 | SHIC 32.95 (paired +1.96, SE 1.47, ours better 49/132) | dir per-seg 33.03 (+1.87, SE 0.89) | iso 34.81 | ZS 39.26 (-4.35, SE 1.37).**
+  Per point 35.01. The 20-bear 30.50 did NOT hold; two-stage is not better than directional per-seg on the bear. `results_twostage/aggregate.json`.
+- **HORSE partial (107/458, 10-05 08:55 UTC): ours 24.16 | SHIC 24.20 | ZS 25.84 (-1.68, SE 1.00).** Tal: 10 examples, then the run may be STOPPED (no need to finish).
+  10 horse examples (`--keep_intermediates`, `runs_horse_twostage_examples/`): 206474 199065 195553 184389 181055 176532 170401 150964 137258 79982 -> `demo/shic/horse_lvis_vs_shic_twostage/`.
+  Horse 42839 FAILED: mask 1784 px < the 2048 centres the recipe samples (no score).
+- **HORSE RUN STOPPED by Tal's call at 133/458 (10-05 10:45 UTC): ours 22.73 | SHIC 22.60 | ZS 24.09** (soft-snap, mean over instances; NOT a random sample).
+  Resume = the env line in `logs/lvis_horse_twostage/chain_after_bear.sh`. Leftovers of the interrupted instance: `data/densepose_lvis/runs_horse_twostage/` (1.6 GB, not deleted).
+  10 horse examples: ours better on 3/10; largest misses 181055 (39.3 vs 8.5) and 79982 (26.5 vs 9.9). Combined images `ALL10_horses.png` there, `v2/ALL10_bears.png` for the bear.
+- **RELATED-WORK SEARCH — OPEN, Tal will come back to it: `/workspace/related_work/RELATED_WORK_SEARCH.md`** (+ raw SHIC citation list, json, same folder). Two checks:
+  (1) who cites SHIC AND outputs per-pixel 3D/template location; (2) does any paper use a proportion/scale PER SEGMENT like ours.
+  State 10-05: lists from ABSTRACTS only, nothing read. Check 1 start: "Emergence of a Shared Canonical Object Frame" 2606.30058, then 2605.28257, Common3D, DINeMo.
+  Check 2: nothing found (NOT a novelty claim); start with A-CSM 2004.00614, Shape-of-You 2603.11618, scale/affine-invariant geodesics. Remaining steps are listed in the file.
+- v2 example figures: `demo/shic/lvis_vs_shic_twostage/v2/SUMMARY_lvis<id>.png` (layout rule in "How Tal wants the assistant to work"). Pre-edit copy `archive/make_lvis_summary_figure.py.bak_2026-10-05`.
+
+## STATE AT POD CLOSE — 2026-10-04 (thirty-seventh pod, 1x RTX 2000 Ada sm_89 16 GB). **NOTHING IS RUNNING.** Tal closes the pod.
+**PAPER day: Tal's first review round on the method draft, all applied.** Latest PDF `paper/review/DISC_v3_2026-10-04.pdf` (4 pages).
+- Template verified = official CVPR 2026 kit (`paper_src/author-kit` @ 2917585, still upstream HEAD on 10-04; cvpr.sty/bst/preamble byte-identical). Tal: stay on the 2026 kit, `\confYear{2027}` (set; not printed in draft mode).
+- Review workflow that worked: Tal highlights + comments in the PDF, uploads to `paper/review/`; extract with pypdf `/Annots` + `pdftotext -bbox` (word boxes inside each highlight quad). `DISC1.pdf` = 16 annotations.
+  Send PDFs back with `SendUserFile` `display: attach` (he downloads them); **show figure changes as images in chat BEFORE putting them in the PDF** (Tal, 10-04).
+- Text applied (`sec/3_method.tex`): mask optional via SAM; shorter motivation + symmetric ambiguity; DFD sentence; normalization = geodesic diameter of each domain, SHIC reference removed
+  (verified in code: `--geodesic`, `true_diameter_2d`); parts $S_1..S_G$; cycle motivation + "makes the features more distinctive / helps symmetric ambiguity" (Tal's line) with a `\tal{}` todo: **needs the with/without-cycle ablation**.
+- Figures (numbering now 1 overview, 2 loss, 3 ellipses, 4 legs), script `bsb/analysis/paper_fig_horse.py` modes `legs | ellipses | loss`:
+  - Fig. 1 (Tal approved): 3 rows (shape / image->map / proportions + ONE shared "Losses" block holding L_rel and L_cyc), dashed gradient arrows back to LoRA and to the proportions, box "Soft correspondence" (not "Soft map"). Needs tikz `fit` (added in `macros.tex`).
+  - Fig. 2 NEW `fig/horse_loss.pdf` (`loss`): a REAL pixel pair on seg 3; image 0.13, ZS expected geodesic 0.36 (two different legs), ours 0.10.
+  - Fig. 3 ellipses + side render of the mesh, tail stub in the tail segment's colour.
+  - Fig. 4 legs, `--top softw` (Tal: "we work with soft"): col 1 = image-row colour key, top = soft weight on the correct side (magma; col 2 of diag_seg_mapping.py), bottom = SOFT points (the off-surface bridge), mesh legs grey.
+    Mean weight on the correct side: ZS 0.40, per-part only 0.38, two-stage 0.99. Soft-SNAP in the bottom row was tried and rejected: it hides the bridge.
+- **Math of 3.4 (Tal walk-through, steps 1, 3, 4 done; step 5 = how s enters the loss / what is learned, still open).** Durable point: `s(u) = sqrt(u^T M u)` is the ellipse's HALF-WIDTH
+  (support function) in direction u, NOT its radius; they agree only along the principal axes (major/minor). Never write "s is the radius of the ellipse" in the paper.
+- texlive is per pod: `logs/texlive_install_pod37.log` has the apt line (latexmk lmodern texlive-{latex-base,latex-recommended,latex-extra,fonts-recommended,pictures,science,bibtex-extra,plain-generic,lang-greek} poppler-utils), ~5 min.
+- Pre-edit copies: `archive/{3_method.tex,overview.tex,paper_fig_horse.py}.bak_2026-10-04`, `archive/paper_fig_bak_2026-10-04/`.
+### NEXT POD (Tal decides)
+1. Tal reads v3; finish the 3.4 walk-through (step 5); then upload to Itai's Overleaf (list in the 10-01 section, + `fig/horse_loss.{tex,pdf}`) and tell Itai.
+2. Cycle ablation (with / without L_cyc) to back the "more distinctive" sentence.
+3. Dual RKD leg flip; remaining figure ideas (see the 10-01 list).
+- **Uncommitted** (bsb, last commit 18f350c): `phase2/train_relational_loss.py`, `scripts/run_shicbear_mu_lora.sh`, `analysis/paper_fig_horse.py`. `/workspace/paper/` is in no repo and NOT yet on Overleaf.
+
+## STATE AT POD CLOSE — 2026-10-01 (thirty-sixth pod, 1x RTX A4500 sm_86 20 GB). **NOTHING IS RUNNING.** Tal closes the pod.
+**The day in one list** (details: the 2026-10-01 section just below):
+- **Git:** 2 weeks of code committed + pushed (`analysis` 8e1d5b9, then 18f350c: subset json, manual_mu, demo fig scripts, `workspace_meta/` notes backup).
+- **Frozen 1.3 (horse tail):** Tal -- a hand-picked number is not a method; needs a GENERIC rule. Measured: 1.3 does NOT fix the tail's proportion
+  (IN ratio 0.44, below learned 0.61); it holds the tail FARTHER from the body (OUT 1.22). Tal checks himself that 1.3 hurt nothing else.
+- **PAPER started** (Itai: Overleaf + CVPR '26 kit, method section first). Local draft `/workspace/paper/` -- method v1 + Fig. 1 pipeline (TikZ),
+  Fig. 2 per-part ellipses (horse), Fig. 3 two-stage / front leg (horse). Draft mode: no CVPR header, line numbers on, `\author{Itai Lang}`.
+  **Not yet uploaded to Itai's Overleaf** (Tal reviews first; corrections by line number in chat or PDF annotations in `/workspace/paper/review/`).
+- **bear3 LoRA vs no LoRA** (two-stage, same recipe): no-LoRA cells look MORE regular -> no evidence for a "LoRA improves" figure. Tal to judge.
+- **DUAL global + local RKD (Tal's idea)** on the horse: tail stays on the stub (75% vs 29%) but the front leg FLIPS to the wrong side (x+ 99%).
+### NEXT POD (Tal decides)
+1. Tal's corrections to the method draft -> then upload to Itai's Overleaf project (upload list in the 10-01 section) and tell Itai.
+2. Dual RKD: the leg flip -- weights other than 1:1 (more global), or dual only after a global warm-up? Still 1 instance, 1 seed.
+3. Remaining figure ideas: directional (bear-132 numbers + a bear visual instead of the guitar), LoRA (only if a fair comparison supports it).
+4. texlive must be re-installed on a new pod (apt, see the 10-01 section) to compile the paper locally.
+- **Uncommitted** (last commit 18f350c): `phase2/train_relational_loss.py` (dual scope), `scripts/run_shicbear_mu_lora.sh` (NO_LORA, MU=dualaniso),
+  NEW `analysis/paper_fig_horse.py`. `/workspace/paper/` is not in any repo. Pre-edit copies `archive/*.bak_2026-10-01`.
+
 ## 2026-10-01 (thirty-sixth pod, 1x RTX A4500 sm_86 20 GB)
 - Committed + pushed 2 weeks of code: bsb `analysis` 8e1d5b9 -> `github` (code only). Still outside git (ignored): `subset20_bear.json`, 6 `demo/**/make_fig.py`, manual_mu files.
 - **Tal on frozen 1.3:** a hand-picked number is NOT acceptable as the method -- it must come from a GENERIC rule (the model must run on any image).
@@ -77,6 +662,28 @@ Goal (long-term): dense correspondence between an image and a 3D object.
   Reading: 1.3 keeps the tail COMPRESSED (IN 0.44, below learned) but holds it FARTHER from the body (OUT 1.22 ~ the scaled target 1.3x).
   The tail stays on the stub because it is pushed AWAY from the body, not because its proportion is matched. Stage B (16/0) has no OUT pairs, so the stage-A OUT distance persists.
   Also: learned "exp" IN reaches 1.02 at s300 while snap is 0.61 -> the expected-geodesic target is met by SPREADING the soft weights, not by moving the tail.
+- **PAPER (Itai, 2026-10-01):** Overleaf project "dense_image_shape_correspondence" (Itai's; title "DISC: Dense Image Shape Correspondence"), CVPR '26 author-kit,
+  draft the METHOD section first, then tell Itai for a pass. No paid Overleaf -> no git: local copy `/workspace/paper/` (one file per section in `sec/`),
+  Tal uploads/pastes into Itai's EXISTING project (do NOT create a new one). Upload: root main.tex macros.tex preamble.tex cvpr.sty ieeenat_fullname.bst main.bib + sec/*.tex + fig/* (create folders first). Before each round, re-download from Overleaf (Itai may have edited).
+  **Tal: the BSB paper (arXiv 2605.18193, source in `/workspace/paper_src/bsb_paper/`) is ONLY a reference for look/length -- do not copy its structure or wording.**
+  texlive is apt-installed per pod (ephemeral): log `/workspace/logs/texlive_install.log`.
+  Method draft v1 in `/workspace/paper/sec/3_method.tex` (Tal: no anchor/L_dist; two-stage learned mu; no frozen 1.3; DFD as a short cited paragraph).
+  Draft mode: `[pagenumbers]` + lineno (no CVPR header), `\author{Itai Lang}`. Tal reviews via line numbers in chat or PDF annotations in `/workspace/paper/review/`.
+  Figures: `fig/overview.tex` (TikZ block diagram), `fig/horse_ellipses.pdf` + `fig/horse_legs.pdf` from NEW `bsb/analysis/paper_fig_horse.py` (legs: ZS / dir per-seg / two-stage, seg 3).
+  Tal asked for a guitar dir-per-seg figure and a bear LoRA with/without figure -- flagged: guitar gain is mostly LoRA (iso+LoRA 91.2, dir+LoRA 92.1, MAIN 89.4) and
+  two-stage is 88.6 on the guitar; directional is better supported by the 132-bear eval (#2 vs #1: -1.78 +- 0.75 SE). LoRA: 2-instance check had no-LoRA winning 3/4.
+- A 20-bear no-LoRA eval was launched by mistake and stopped; its results/logs/intermediates were DELETED (Tal). Tal wants the LoRA comparison on bear3 ONLY.
+- **BEAR3 LoRA ABLATION (Tal, 2026-10-01):** NEW `NO_LORA=1` in `scripts/run_shicbear_mu_lora.sh` (full fine-tune, no alpha; pre-edit copy `archive/run_shicbear_mu_lora.sh.bak_2026-10-01`).
+  Run two-stage learned (`MU=globalthenaniso MU_LR=5e-2 NIN=8 NOUT=8 SUFFIX=_mulr5e-2_in8out8_sw150 NO_LORA=1`), log `logs/bear3_globalthenaniso_sw150_nolora.log`, drift 0.857.
+  Figure `bsb/demo/shic/comparison_bear3_lora_vs_nolora/bear3_twostage_lora_vs_nolora.png` (SHIC / LoRA a0.5 / no LoRA). Visually the no-LoRA cells look MORE regular (as on LVIS 09-20). Tal judges.
+- **DUAL GLOBAL + LOCAL RKD (Tal's idea, 2026-10-01):** NEW `--mu_scope dual_global_local_aniso` (alias `dual_global_segment_aniso`) + `--dual_local_nin`;
+  `MU=dualaniso DUAL_NIN=16` in run_shicbear_mu_lora.sh. Every step: GLOBAL term 8 in + 8 out with ONE shared ellipse (last row) AND LOCAL term 16 in with
+  per-seg ellipses, one Huber mean -> 1:1. Pre-edit copy `archive/train_relational_loss.py.bak_2026-10-01`. Log `logs/horse164135_dual_g8in8out_l16.log`.
+  | horse 164135 | seg 3 leg | tail on stub (soft-snap) | tail IN ratio snap | inst soft/argmax (3 pts) |
+  | two-stage learned | x- 100% (correct), mixed 1.7% | 28.6% | 0.61 | 6.37 / 7.47 |
+  | **dual 1:1** | **x+ 99% (WRONG side)**, mixed 4.3% | **75.2%** | 0.25 (compressed) | 5.55 / 5.55 |
+  Global ellipse 0.97/0.84 @48; per-seg ellipses DO differ from it (tail 1.70/0.88), so the local term is not inert. Tail held but compressed, leg flipped.
+  Figures `bsb/demo/shic/lvis164135_mu/figures/dual_global_local/{backproj_twostage_vs_dual.png, seg3_mapping.png, tail.png, tail_pair_ratio.json}`. 1 instance, 1 seed.
 
 ## STATE AT POD CLOSE — 2026-09-29 (thirty-fifth pod, 1x RTX 4000 Ada sm_89 20 GB). **NOTHING IS RUNNING.** Tal closes the pod.
 **The day in one list** (details: the 2026-09-29 section just below):
@@ -3038,6 +3645,16 @@ git config --global --add safe.directory /workspace/bsb
   (*"עד היום הצלחת להציג לי פה את התמונות אבל משום מה היום זה רק מראה path"*). Use `SendUserFile`
   with `display: "render"`. `Read` stays useful for the assistant to LOOK at a figure before
   describing it; it just never counts as presenting it.
+- **LVIS EXAMPLE FIGURE = THE v2 LAYOUT (Tal approved 2026-10-05: "save these settings, this is how we do it from now on").** Built by
+  `scripts/make_lvis_arm_summary.sh` (-> `analysis/render_lvis_markers_2d.py` + `analysis/make_lvis_summary_figure.py`). Do not change without asking:
+  - Top row: crop + GT points | coloured mesh (the colour key; its title on the SAME line as its neighbours) | OURS back-proj (soft-snap) | SHIC back-proj | error table.
+  - Table: per-point errors, then ONE "mean error" row with ours AND SHIC under their columns (green = ours closer, red = SHIC). No "context" block, no argmax line (we work with soft-snap).
+  - Bottom row: FOUR mesh views chosen per instance for marker visibility; markers = real 3D spheres (GT 0.04, predictions 0.85x), point number on each;
+    a sphere hidden by the animal is drawn FADED (alpha 0.38). The marker legend sits at the bottom right, beside the mesh row, with ROUND swatches.
+  - Rejected on the way: 3D digit geometry (unreadable), flat 2D discs + dashed rings (front/behind unclear), geodesic label->prediction tubes (clutter), 3 views, ellipse swatches.
+- **CROWDING-STUDY FIGURE LAYOUT (Tal approved 2026-10-13, pod 46: "this is how I want to see the rest of the research"):** column 0 = the ORIGINAL training-metric
+  paths (no features), then one column per variant; row 1 on the photo, row 2 on the feature PCA, row 3 = cos-similarity heatmap of C and of each neighbour.
+  `analysis/plot_2d_feature_geodesic_paths.py --similarity_row`. Send it with `SendUserFile` (load it via ToolSearch if it is not in the tool list), never a bare link.
 - **Comparison figures: ONE LONG ROW PER ARM, arms stacked one above the other** -- Tal's phrasing
   when the three ZS arms were compared (2026-09-08), and he confirmed it reads well. Same query in
   the same column all the way down is what makes arms comparable at a glance; a per-arm 2xN grid
@@ -3055,7 +3672,10 @@ git config --global --add safe.directory /workspace/bsb
   the path. No restating the question, no listing options that were not taken, no narrating what
   is about to be run. Tal will ask for expansion where he wants it. Same rule applies to entries
   written into this file.
-- ~~REPLY IN HEBREW (Tal, 2026-09-15)~~ ~~REVERSED 2026-09-15 to English~~ **2026-09-16: REPLY IN HEBREW again, and SHORTER** ("תקצר קצת במלל ותרשום בעברית"). Paths/flags/numbers stay as-is. Entries written INTO this file stay in English.
+- ~~REPLY IN HEBREW (Tal, 2026-09-15)~~ ~~REVERSED 2026-09-15 to English~~ **2026-09-16: REPLY IN HEBREW again, and SHORTER** ("תקצר קצת במלל ותרשום בעברית"). Paths/flags/numbers stay as-is. Entries written INTO this file stay in English. **2026-10-04: Tal asked TWICE to have a Hebrew technical answer rewritten in English** -> explanations/results in English, short chat lines in Hebrew, and still SHORT ("תרשום קצת יותר בקצרה"). **2026-10-12 (pod 45): Tal asked to have the English pod-opening summary rewritten in Hebrew ("תרשום בעברית") -> the opening summary and chat replies in HEBREW.** **2026-10-13 (pod 46): Tal asked to have the HEBREW pod-opening summary rewritten in English ("תרשום באנגלית") -> opening summary in ENGLISH (it is technical content); only short chat lines in Hebrew.** **Later the same pod: "אפשר לחזור לעברית" -> back to HEBREW for the rest of the session (tables/paths/flags as-is). He switches per session; follow the latest request, do not argue from older ones.**
+- **BEFORE A BIG RUN, ASK WHICH INSTANCES GET FIGURES (Tal, 2026-10-08):** an eval / batch deletes each run dir after scoring, so figures later = retraining (~8.5 min each). Ask once before launch every how many instances (or which) to keep the run dir + build the figures; say the disk cost (~2.2 GB per kept run).
+- **SEGMENT MERGE 1.5% ON EVERY RUN (Tal, 2026-10-07):** `--merge_below_frac 0.015` / `MERGE=0.015`, see the 2026-10-07 entry.
+- **SHORTER AGAIN (Tal, 2026-10-06, asked 3 times in one day):** one headline line + one small table + the path. No hypotheses, method notes or interpretation unless asked.
 - **SHORTER STILL (Tal, 2026-09-15: "קשה לי לקרוא כל כך הרבה")** — a result = 3-4 bullet lines + one small table. No paragraphs of interpretation.
 - **"Smooth" back-projection is Tal's VISUAL judgement, not a metric (2026-09-15).** Show the images and let him judge; do not build long automatic chains he did not ask for — he wants to drive the ablation one step at a time.
 - ~~Every arm in the squash-smoothness direction: compare vs MAIN AND squash~~ **REPLACED 2026-09-16: compare every new arm vs MAIN (T=0.01) only. Squash is a bug, not a reference.**
@@ -3066,6 +3686,11 @@ git config --global --add safe.directory /workspace/bsb
 - **WATCH EVERY LAUNCHED RUN AND REPORT UNPROMPTED (Tal, 2026-09-15: "אתה אמור לדעת שזה מסיים ולא לחכות שאשאל").**
   Right after a detached launch, start a completion watcher on the log (DONE marker or process exit, plus failure
   patterns) and present results as soon as it fires.
+- **POD OPENING = READ, SUMMARIZE IN 3-4 LINES, ASK. RUN NOTHING (Tal, 2026-10-09: "all we wanted was that you go over the project notes, usually half a minute").**
+  No env/import timings, no queue, no code reading before he says what to continue with.
+- **A LONG RUN MUST NOT DEPEND ON THE ASSISTANT'S SESSION (Tal, 2026-10-11: "why did you not rerun it when it got stuck?"):** start a detached supervisor
+  on the pod that restarts it if it dies or hangs (see the 2026-10-11 entry); a watcher inside the chat session dies with the session.
+- **ANSWER FIRST, THEN WAIT (Tal, 2026-10-11: "why does it take you so long to respond?"):** never block the chat on a multi-minute test; reply, run it in the background.
 - **ONLY TAL CLOSES THE POD.** At the end, update this file and say it is ready; never shut anything down.
 - **ASK BEFORE IMPLEMENTING WHEN TERMS ARE AMBIGUOUS.** Tal wants to confirm shared understanding first (e.g. the
   five RKD variants, 2026-09-15) — restate precisely, map to code/flags, wait for his go.

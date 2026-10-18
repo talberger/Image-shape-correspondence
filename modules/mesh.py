@@ -1,10 +1,13 @@
 import kaolin as kal
 import torch
 import modules.utils as utils
-try:
-    import open3d as o3d
-except ModuleNotFoundError:
-    print("No module named 'open3d'")
+class _LazyOpen3d:
+    """open3d is imported on first use (2026-10-07): importing it costs ~10 s per process from the
+    network volume, and almost no script that imports this module ever calls it."""
+    def __getattr__(self, name):
+        import open3d
+        return getattr(open3d, name)
+o3d = _LazyOpen3d()
 import copy
 import numpy as np
 import PIL

@@ -194,6 +194,11 @@ def sample_in_segment_neighbors(coords, segment_ids, seg_idx, k=8, max_retries=1
     return cand
 
 
+# Tal, 2026-10-06: the rim of the coarse mask that SAM leaves without a fine segment "is not part of the animal".
+# True = out-of-segment neighbours are never drawn there (centres never were). Set by --out_neighbors_segmented_only.
+OUT_NEIGHBORS_SEGMENTED_ONLY = False
+
+
 def sample_out_segment_neighbors(coords, segment_ids, seg_idx, k=8, max_retries=10):
     """For each center pixel, k random pixels NOT in its fine segment (any
     other segment, still on the object), with replacement, resampled fresh on
@@ -227,24 +232,39 @@ def sample_out_segment_neighbors(coords, segment_ids, seg_idx, k=8, max_retries=
     n = coords.shape[0]
     num_mask_pixels = seg_idx.mask_coords.shape[0]
 
+    def is_bad(ix):
+        b = seg_idx.mask_segids[ix] == segment_ids.unsqueeze(1)
+        if OUT_NEIGHBORS_SEGMENTED_ONLY:                     # mask pixels with no fine segment are not neighbours
+            b = b | (seg_idx.mask_segids[ix] == 0)
+        return b
+
     idx = torch.randint(0, num_mask_pixels, (n, k))
-    bad = seg_idx.mask_segids[idx] == segment_ids.unsqueeze(1)
+    bad = is_bad(idx)
 
     for _ in range(max_retries):
         if not bad.any():
             break
         redraw = torch.randint(0, num_mask_pixels, (n, k))
         idx = torch.where(bad, redraw, idx)
-        bad = seg_idx.mask_segids[idx] == segment_ids.unsqueeze(1)
+        bad = is_bad(idx)
 
     if bad.any():
+        # 2026-10-08 (speed, results bit-identical): the pool of a segment is built ONCE per call, not once per entry. With
+        # --merge_below_frac one segment is 75-90% of the mask, so the rejection rounds above leave ~1200 entries per step for
+        # this loop, and rebuilding the pool (a nonzero over the whole mask) for each of them was ~45% of a stage-1 step.
+        # Same entries, same order, same torch.randint calls -> the same random stream as before.
+        pools = {}
         for i, j in torch.nonzero(bad, as_tuple=False).tolist():
             s = segment_ids[i].item()
-            while True:
-                candidate = torch.randint(0, num_mask_pixels, (1,)).item()
-                if seg_idx.mask_segids[candidate].item() != s:
-                    idx[i, j] = candidate
-                    break
+            pool = pools.get(s)
+            if pool is None:
+                ok = seg_idx.mask_segids != s
+                if OUT_NEIGHBORS_SEGMENTED_ONLY:
+                    ok = ok & (seg_idx.mask_segids != 0)
+                pool = pools[s] = torch.nonzero(ok, as_tuple=False).flatten()
+            if pool.numel() == 0:
+                raise RuntimeError('segment %d has no out-of-segment pixel to draw a neighbour from' % s)
+            idx[i, j] = pool[torch.randint(0, pool.numel(), (1,))].item()
 
     return seg_idx.mask_coords[idx]
 

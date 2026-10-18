@@ -117,6 +117,17 @@ def shic_predict(ann, imgs, device, class_name):
     return (emb @ shape_feats.T).argmax(1).cpu().numpy()
 
 
+def shic_cached(ann, imgs, device, class_name, tag):
+    """2026-10-08 (speed): SHIC's prediction at the GT points depends only on the image + bbox, so it is cached per instance
+    (loading SHIC is most of this script's time). Delete the file to recompute."""
+    cache = os.path.join('data/densepose_lvis', f'eval_shic_{class_name}', 'point_cache', f'{tag}.json')
+    if os.path.exists(cache):
+        return np.array(json.load(open(cache))['shic_vertex'])
+    shic_v = shic_predict(ann, imgs, device, class_name)
+    os.makedirs(os.path.dirname(cache), exist_ok=True); json.dump({'ann_id': ann['id'], 'shic_vertex': shic_v.tolist()}, open(cache, 'w'))
+    return shic_v
+
+
 def our_predict(run_dir, tag, our_pred_f, obj_path, name, rows, cols, k, temperature, device):
     """Our prediction at the same GT pixels: our features in OUR crop, soft-snap + argmax."""
     pix = torch.load(os.path.join(run_dir, f'{tag}_pix_sdsquare_fuse16.pth'), map_location='cpu')
@@ -140,7 +151,8 @@ def main():
     ap.add_argument('--class_name', default='bear')
     ap.add_argument('--run_dir', required=True)
     ap.add_argument('--tag', default=None, help='defaults to lvis<ann_id>')
-    ap.add_argument('--our_pred_f', required=True)
+    ap.add_argument('--our_pred_f', default=None)
+    ap.add_argument('--shic_only', action='store_true', help='only compute + cache SHIC\'s prediction at the GT points, then exit')
     ap.add_argument('--obj_path', default='./demo/shic/shapes/bear.obj')
     ap.add_argument('--name', default='shic_bear')
     ap.add_argument('--geodesics_path', default='data/densepose_lvis/eval_shic_bear/bear_heat_geodesics_228.npy')
@@ -164,10 +176,12 @@ def main():
     anns, imgs = load_instances(args.class_name)
     ann = next(a for a in anns if a['id'] == args.ann_id)
 
+    if args.shic_only:   # fill the cache while our model still trains (scripts/debug_twostage_instance.sh, early chain)
+        shic_cached(ann, imgs, device, args.class_name, tag); print('SHIC point cache ready'); return
     ours_soft, ours_argmax, mesh = our_predict(
         args.run_dir, tag, args.our_pred_f, args.obj_path, args.name, rows, cols,
         args.k_vertices_per_pixel, args.read_temperature, device)
-    shic_v = shic_predict(ann, imgs, device, args.class_name)
+    shic_v = shic_cached(ann, imgs, device, args.class_name, tag)
 
     G = np.load(args.geodesics_path)
     err_ours = G[gt_vertex, ours_soft]
