@@ -82,7 +82,7 @@ Goal (long-term): dense correspondence between an image and a 3D object.
   (3) notes in the repo [done, see top of file]; (4) data/results stay on the server, rsync to the Mac only what is needed.
 - **RENAME bsb -> disc (Tal: "we started from BSB but moved elsewhere"):** repo dir `/workspace/disc` (`/workspace/bsb` = symlink, so old
   run configs / paths still resolve); conda env `disc` (= symlink `miniconda3/envs/disc -> bsb`); paper clone `/workspace/DISC` -> `/workspace/DISC_paper`
-  (avoids a disc/DISC clash on the case-insensitive Mac). GitHub repo rename (Image-shape-correspondence -> disc) left to Tal.
+  (avoids a disc/DISC clash on the case-insensitive Mac). GitHub repo renamed by Tal: `git@github.com:talberger/disc.git` (remote `github`), default branch = `analysis`; README cut to a minimal DISC one.
 - **ACTIVATION, every machine: `source <repo>/env/activate.sh`** -> sets `DISC_ROOT` (repo), `DISC_WS` (folder around it: logs, .cache, sam3_repo,
   pix2gestalt_repo; pod `/workspace`, Mac = repo parent), TORCH_HOME/HF_HOME, activates `disc`, installs the deploy key on a pod, cds to the repo.
   `/workspace/activate_bsb.sh` (and `activate_disc.sh`) now only source it. All 375 shell scripts use `$DISC_ROOT` / `$DISC_WS` instead of `/workspace/...`.
@@ -3635,7 +3635,7 @@ git config --global --add safe.directory /workspace/bsb
   fetch; pretrained weights are a separate `load_state_dict_from_url` call
   that still needs `TORCH_HOME` redirected or it re-downloads ~1.1GB every
   pod. Already wired in `activate_bsb.sh`, nothing to do.
-- **GitHub push access** (personal fork, `git@github.com:talberger/Image-shape-correspondence.git`,
+- **GitHub push access** (personal fork, `git@github.com:talberger/disc.git`,
   remote `github`): SSH deploy key at `/workspace/.ssh/id_ed25519_github`.
   `/workspace` itself can't hold restrictive file perms (network volume), so
   `activate_bsb.sh` copies the key to `/root/.ssh/` (ephemeral, correct perms)
