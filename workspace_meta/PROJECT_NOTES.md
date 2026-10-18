@@ -91,7 +91,10 @@ Goal (long-term): dense correspondence between an image and a 3D object.
 - **MAC SET UP (Tal's Claude Code on the Mac):** `~/Projects/disc` (DISC_WS=~/Projects), miniconda `~/miniconda3`, env `disc` python 3.9.23,
   torch 1.12.1 CPU / numpy 1.26.4 / open3d 0.17.0, module imports OK. Mac-only deviations (Tal chose same versions or nothing): NO pymeshlab
   (no py3.9 arm64 wheel -> remeshing stays on the pod); open3d needs `llvm-openmp` from conda-forge + DYLD_FALLBACK_LIBRARY_PATH (steps in the
-  header of `env/requirements_disc_mac.txt`). No data on the Mac yet.
+  header of `env/requirements_disc_mac.txt`). `env/activate.sh` works there without conda's shell hook (6fbb1c4).
+- **DATA TO THE MAC: `bash scripts/sync_from_pod.sh <pod IP> <SSH port> [base|horse56069|<repo path> ...]`** (run on the Mac, rsync pull-only;
+  the Mac's SSH key is already in the pod's authorized_keys). Synced 2026-10-18: `base` + `horse56069` (~3.6 GB), mesh load checked on the Mac.
+- **Code outside the repo moved in:** our SAM 3 / pix2gestalt scripts -> `external/` (bd0665c); copy them into the clones on a new GPU machine.
 - **Run:ai status (from Tal's Claude Desktop session):** Docker Hub user `tberger3`, test image `tberger3/disc:v1` (built `--platform linux/amd64`);
   runai-cli 2.26.51, SSO login OK; project `avidan`, cluster hpc-220711; PVC `tal-disc-data` (lustre-user, RWO, 100G, at /workspace);
   workspace `tberger3-dev` (0 GPU) Running. **Blocked on the TAU VPN** (cluster API reachable only from TAU network).
