@@ -28,9 +28,20 @@ if [ -d /workspace/miniconda3 ]; then
         grep -q github.com /root/.ssh/known_hosts 2>/dev/null || \
             ssh-keyscan -t ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null
     fi
-elif command -v conda >/dev/null 2>&1 && [ "${CONDA_DEFAULT_ENV:-}" != disc ]; then
-    # Mac / any machine with its own conda: env 'disc' from env/requirements_disc_*.txt
-    eval "$(conda shell."$(basename "${SHELL:-bash}")" hook 2>/dev/null)" && conda activate disc
+elif [ "${CONDA_DEFAULT_ENV:-}" != disc ]; then
+    # Mac / any machine with its own conda: env 'disc' from env/requirements_disc_*.txt.
+    # Activate WITHOUT conda's shell hook (it fails in Claude Code's shell on the Mac: "__conda_exe:
+    # permission denied"): put the env first on PATH, which is all the scripts need.
+    for _p in "${CONDA_PREFIX_DISC:-}" "$HOME/miniconda3/envs/disc" "$HOME/anaconda3/envs/disc" "/opt/miniconda3/envs/disc"; do
+        if [ -n "$_p" ] && [ -x "$_p/bin/python" ]; then
+            export CONDA_PREFIX="$_p" CONDA_DEFAULT_ENV=disc PATH="$_p/bin:$PATH"; break
+        fi
+    done
+    unset _p
+fi
+if [ "$(uname)" = Darwin ] && [ -n "${CONDA_PREFIX:-}" ]; then
+    # open3d 0.17 links Homebrew's libomp; on the Mac it comes from conda-forge llvm-openmp in the env.
+    export DYLD_FALLBACK_LIBRARY_PATH="$CONDA_PREFIX/lib:/usr/local/lib:/usr/lib"
 fi
 # Docker image (Run:ai): the image's python already is the disc env; nothing to activate.
 
