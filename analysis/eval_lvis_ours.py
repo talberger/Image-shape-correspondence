@@ -30,7 +30,7 @@ asking the mapping about a pixel it never saw. If the two blocks diverge a lot, 
 mask quality, not about the correspondence.
 
 Run (one instance, after scripts/run_lvis_instance.sh has produced the alpha export):
-cd /workspace/bsb && python analysis/eval_lvis_ours.py \
+cd $DISC_ROOT && python analysis/eval_lvis_ours.py \
   --run_dir data/densepose_lvis/runs/lvis117683 --tag lvis117683 \
   --vertex_features_path data/densepose_lvis/runs/lvis117683/encoder_loraW_all_r4_phase2/alpha/alpha0.5/pred_f.pth \
   --obj_path ./demo/shic/shapes/bear.obj --name shic_bear \

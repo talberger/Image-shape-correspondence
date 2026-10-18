@@ -5,8 +5,8 @@
 # heat geodesics the per-instance eval needs). The 3D geodesic table is built by the first per-instance run.
 # Usage: CLASS=horse bash scripts/run_shicclass_setup.sh
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 CLASS=${CLASS:?}
 case "$CLASS" in horse) MESH=horse_5004 ;; elephant) MESH=elephant_5002 ;; *) echo "unknown CLASS"; exit 1 ;; esac
 OBJ=./demo/shic/shapes/$CLASS.obj; NAME=shic_$CLASS

@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Step-progression gate for the DINO+SD fusion run (roadmap item 1, Stage 3). Mirrors
 # run_relational_geodesic_mu3dscale1_frontcenteredinit_newmask_analysis.sh exactly, except:

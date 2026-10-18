@@ -5,7 +5,7 @@
 # (1527 1545 2760 642 -> 535 549 1017 2885), and the back-projection filenames derived from the
 # checker file's own stem (they are named after the vertex-colour file, not the mesh).
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Full analysis suite for the cross-view-batched DFD phase-2 run
 # (encoder_dino_sd_stride14_nosdsquare_relational_geodesic_mu3dscale1_T0.01_seed0_phase2, see PROJECT_NOTES.md

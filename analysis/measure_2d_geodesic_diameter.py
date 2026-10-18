@@ -20,7 +20,7 @@ the same 8-connected graph build_2d_table uses (1.0 orthogonal, sqrt(2) diagonal
 are directly comparable to the stored `diagonal` -- this is not a different distance.
 
 Run:
-cd /workspace/bsb && python analysis/measure_2d_geodesic_diameter.py \
+cd $DISC_ROOT && python analysis/measure_2d_geodesic_diameter.py \
   --mask_path demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \
   --geo_table_2d_path ./experiments/guitar/geodesic_tables/guitar_01_click_270_370_sam_mask_2_geo_table_2d_seed0.pth
 """

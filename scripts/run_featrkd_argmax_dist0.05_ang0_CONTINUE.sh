@@ -5,8 +5,8 @@
 # Stages 2-4 are verbatim copies of the corresponding blocks of run_featrkd_argmax_ANALYZE_BEST.sh,
 # with BEST fixed to the arm that won the sweep on mean AUC.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 BEST=dist0.05_ang0
 
 RUNBASE=encoder_dino_sd_stride14_nosdsquare_featrkd_argmax_${BEST}_T0.01_seed0_phase2
@@ -16,7 +16,7 @@ echo "===== [2/4] full analyze (read T=1) ====="
 ./run_featrkd_argmax_${BEST}_full_analyze.sh > $L/featrkd_argmax_${BEST}_full_analyze.log 2>&1
 
 echo "===== [3/4] soft mapping + back-projection at read T=0.01 ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   MASK=demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth
   POSCOLOR=demo/guitar/segment_masks_pixel270_370/pixel_coloring/guitar_01_click_270_370_sam_mask_2_position_color.png
   CHECKER=demo/guitar/colored_mesh/guitar_mesh_checker16_color.pth
@@ -41,7 +41,7 @@ echo "===== [3/4] soft mapping + back-projection at read T=0.01 ====="
 grep -h "vertex coverage" $L/featrkd_argmax_${BEST}_readT.log | tail -1
 
 echo "===== [4/4] comparison vs the baseline ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   BASE=demo/guitar/runs/oldmesh_sweeps/stride14/bsb_sd_dino_stride14_nosdsquare_T0.01_seed0_phase2
   RUN=demo/guitar/$DEMOBASE
   BP=back_projection/guitar_01_click_270_370_sam_mask_2_backproj_guitar_mesh_checker16_color_soft_snap_k1_side_by_side.png

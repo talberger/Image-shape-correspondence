@@ -6,8 +6,8 @@
 # Labels (2026-09-11, Tal): every row must show what differs between rows; "allpix" is never shown (it is the only
 # variant in use), w_spatial is shown on all rows only when some row differs from 1.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 CYC_T=$1; ALLPIX=$2; WS=$3; WB=$4; WW=$5
 [ -n "$WW" ] || { echo "usage: $0 <CYC_T> <allpix 0|1> <w_strong> <w_balanced> <w_weak>"; exit 1; }

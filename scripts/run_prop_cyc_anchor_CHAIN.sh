@@ -6,8 +6,8 @@
 # exactly the equal-norm point), cycle at 1/5 (old c=1.05e-5 was ~1/5).
 # Usage: ./run_prop_cyc_anchor_CHAIN.sh <pid_to_wait_for>
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 WAIT_PID=${1:-}
@@ -17,7 +17,7 @@ if [ -n "$WAIT_PID" ]; then
 fi
 
 CK=experiments/guitar/encoder_isobbox_sdsquare_fuse16_truediag2d_mu_learn_perseg_T1_seed0_phase2/encoder_checkpoint_step25.pth
-CAL=/workspace/logs/prop_cyc_anchor_calibrate.log
+CAL=$DISC_WS/logs/prop_cyc_anchor_calibrate.log
 echo "===== calibration at $CK ====="
 python phase2/train_relational_loss_l2norm.py \
   --obj_path "$OBJ" --name "$NAME" --init_encoder_dir "$PHASE1" \

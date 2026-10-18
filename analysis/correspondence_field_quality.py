@@ -25,7 +25,7 @@ Three families, all computed on the top-1 pixel->vertex map:
   a compact photo region onto a compact surface region.
 
 Run (ZS vs its phase-2, the comparison this was written for):
-cd /workspace/bsb && python analysis/correspondence_field_quality.py \
+cd $DISC_ROOT && python analysis/correspondence_field_quality.py \
   --knn_paths demo/guitar/runs/isobbox/bsb_isobbox_ZS_sdsquare/analyze/guitar_01_click_270_370_sam_mask_2_pixel_to_vertex_nn.pth \
                demo/guitar/runs/isobbox/bsb_isobbox_sdsquare_olddiag2d_T1_seed0_phase2/analyze/guitar_01_click_270_370_sam_mask_2_pixel_to_vertex_nn.pth \
   --labels "ZS" "phase-2 T=1" \

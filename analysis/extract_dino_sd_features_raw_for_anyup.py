@@ -10,7 +10,7 @@ pattern as the (since-removed) geoaware env; the two envs never import each
 other.
 
 Run (bsb env):
-cd /workspace/bsb && python analysis/extract_dino_sd_features_raw_for_anyup.py \\
+cd $DISC_ROOT && python analysis/extract_dino_sd_features_raw_for_anyup.py \\
   --img_path ./images/guitar_01.png \\
   --output_path ./demo/guitar/features_analyze/dino_sd_poc/guitar_01_dino_sd_raw_for_anyup.pth
 """

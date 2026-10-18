@@ -15,7 +15,7 @@ difference here: instance-level SE on the full 132 is 2.44, the mean is dominate
 about 2.5 is not a result.
 
 Run:
-cd /workspace/bsb && python analysis/aggregate_lvis_results.py --results_dir data/densepose_lvis/results
+cd $DISC_ROOT && python analysis/aggregate_lvis_results.py --results_dir data/densepose_lvis/results
 """
 import argparse
 import glob

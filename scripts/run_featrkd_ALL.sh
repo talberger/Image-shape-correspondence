@@ -8,8 +8,8 @@
 # Phase-2 + step progression + eval only; the full analysis battery (~24 min each) is held until
 # Tal has seen which runs are worth it.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 EL=demo/guitar/eval_labels
 for cfg in dist0.2_ang0 dist0_ang0.2 dist0.2_ang0.2; do
   echo "########## $cfg : phase-2 ##########"
@@ -17,7 +17,7 @@ for cfg in dist0.2_ang0 dist0_ang0.2 dist0.2_ang0.2; do
   echo "########## $cfg : step progression ##########"
   ./run_featrkd_${cfg}_analysis.sh     > $L/featrkd_${cfg}_analysis.log 2>&1
   echo "########## $cfg : eval ##########"
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/eval_geodesic_error.py \
       --run_label "featRKD $cfg" \
       --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth \
@@ -28,7 +28,7 @@ for cfg in dist0.2_ang0 dist0_ang0.2 dist0.2_ang0.2; do
       --plot_path $EL/eval_featrkd_${cfg}.png ) > $L/featrkd_${cfg}_eval.log 2>&1
 done
 echo "########## four-way comparison ##########"
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/compare_eval_runs.py \
     --runs $EL/eval_stride7_gridalign.pth $EL/eval_featrkd_dist0.2_ang0.pth $EL/eval_featrkd_dist0_ang0.2.pth $EL/eval_featrkd_dist0.2_ang0.2.pth \
     --labels "baseline (no feat RKD)" "beta=0.2 distance" "gamma=0.2 angle" "both 0.2" \

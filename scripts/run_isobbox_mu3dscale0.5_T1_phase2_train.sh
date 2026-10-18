@@ -5,8 +5,8 @@
 # norm_d_3D/mu_3d_scale ~= norm_d_2D the model must produce HALF the raw 3D distances, i.e. pull
 # mapped points CLOSER together. (>1 pushes them apart; this is the opposite direction.)
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 time python phase2/train_relational_loss_l2norm.py \
   --obj_path ./meshes/guitar_isotropic_bboxnorm.obj --name guitar_isobbox \
   --init_encoder_dir ./experiments/guitar/encoder_isobbox_dino_sd_dfd_crossview_phase1 \

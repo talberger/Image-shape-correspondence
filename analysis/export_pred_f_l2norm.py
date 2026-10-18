@@ -22,7 +22,7 @@ the already-patched name instead of the original.
 
 Run: identical CLI to export_pred_f.py (single-checkpoint or --checkpoints/--outputs batch mode),
 e.g. for the SD-DINO L2norm phase-2 run's step-progression:
-cd /workspace/bsb && python analysis/export_pred_f_l2norm.py \
+cd $DISC_ROOT && python analysis/export_pred_f_l2norm.py \
   --checkpoints <comma-separated step checkpoints> --outputs <comma-separated pred_f paths> \
   --width 2304 --n_classes 2304
 """

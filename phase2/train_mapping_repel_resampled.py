@@ -40,7 +40,7 @@ are none of them modified by this script -- separate experiment, so every
 existing run stays exactly reproducible.
 
 Run (from /workspace/bsb, so `modules.*` and `phase2.*` both resolve):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python -m phase2.train_mapping_repel_resampled \\
+cd $DISC_ROOT && python -m phase2.train_mapping_repel_resampled \\
     --object_mask_path <coarse mask> --pix_dino_features_path <pixel features> \\
     --lambda_map 0.5 --lambda_repel 0.5 --num_iters 300 --checkpoint_every 25
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # ZS (zero-shot -- right after phase-1, no phase-2 fine-tuning) analysis for the GeoAware-SC
 # ("Telling Left from Right", Zhang et al. CVPR 2024) pretrained-feature-backbone experiment

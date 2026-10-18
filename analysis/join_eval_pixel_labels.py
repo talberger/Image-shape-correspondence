@@ -30,7 +30,7 @@ through the SAME normalizer loadmesh() applies to the mesh, which is a verified 
 meshes/guitar.obj and the correct transform for any other mesh.
 
 Run:
-cd /workspace/bsb && python analysis/join_eval_pixel_labels.py \
+cd $DISC_ROOT && python analysis/join_eval_pixel_labels.py \
   --pp_path demo/guitar/eval_labels/guitar_picked_points.pp \
   --pixel_labels_path demo/guitar/eval_labels/pixel_labels.pth \
   --save_dir demo/guitar/eval_labels

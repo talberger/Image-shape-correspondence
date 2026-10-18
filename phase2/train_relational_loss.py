@@ -36,7 +36,7 @@ module docstring for the full argument):
     instead. Tal's 2026-08-11 hypothesis.
 
 Run (from /workspace/bsb, so `modules.*` and `phase2.*` both resolve):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python -m phase2.train_relational_loss \\
+cd $DISC_ROOT && python -m phase2.train_relational_loss \\
     --object_mask_path <coarse mask> --pix_dino_features_path <pixel features> \\
     [--live_mu_3d --fixed_neighbors]   # add for Version 2
 

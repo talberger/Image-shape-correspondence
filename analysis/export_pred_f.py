@@ -15,7 +15,7 @@ we fall back to reproducing phase 1's RNG sequence -- verified to work, see
 analysis/verify_encoder_resume.py.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python \
+cd $DISC_ROOT && python \
   analysis/export_pred_f.py \
   --checkpoint ./experiments/guitar/encoder_dino_mapping/encoder_checkpoint_step150.pth \
   --output ./experiments/guitar/encoder_dino_mapping/pred_f_step150.pth

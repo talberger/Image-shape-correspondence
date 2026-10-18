@@ -8,8 +8,8 @@
 # Arms: beta = 0.05, 0.1, 0.5. Everything else identical to the baseline and to the beta=0.2 arm:
 # stride14 + squash photo features, phase-1 dfd_crossview, T=0.01, seed 0, same GPU.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 EL=demo/guitar/eval_labels
 PIX=demo/guitar/features_analyze/dino_sd_stride14_nosdsquare/guitar_01_pix_stride14_nosdsquare.pth
 
@@ -17,7 +17,7 @@ for BETA in 0.05 0.1 0.5; do
   TAG=dist${BETA}_ang0
   OUT=./experiments/guitar/encoder_dino_sd_stride14_nosdsquare_featrkd_argmax_${TAG}_T0.01_seed0_phase2
   echo "===== [train] beta=$BETA ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python phase2/train_relational_loss_l2norm.py \
       --init_encoder_dir ./experiments/guitar/encoder_dino_sd_dfd_crossview_phase1 \
       --object_mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \
@@ -30,7 +30,7 @@ for BETA in 0.05 0.1 0.5; do
   grep -E "^step (25|300)/300" $L/featrkd_argmax_${TAG}.log | sed 's/(mu_2D.*featD/featD/'
 
   echo "===== [eval] beta=$BETA ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/eval_geodesic_error.py \
       --run_label "featrkd ARGMAX beta=$BETA" \
       --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth --features_path $PIX \
@@ -40,7 +40,7 @@ for BETA in 0.05 0.1 0.5; do
 done
 
 echo "===== [compare] full beta sweep vs baseline ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/compare_eval_runs.py \
     --runs $EL/eval_stride14_nosdsquare_T0.01_seed0.pth \
            $EL/eval_featrkd_argmax_dist0.05_ang0.pth \

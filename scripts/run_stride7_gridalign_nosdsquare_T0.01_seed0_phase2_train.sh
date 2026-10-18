@@ -5,8 +5,8 @@
 # the squashed framing on square inputs and renders are square, so the framing change touches the
 # photo features only (verified 2026-08-31, max abs diff 0.0 on a square input).
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 time python phase2/train_relational_loss_l2norm.py \
   --init_encoder_dir ./experiments/guitar/encoder_dino_sd_stride7_gridalign_dfd_crossview_phase1 \
   --object_mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \

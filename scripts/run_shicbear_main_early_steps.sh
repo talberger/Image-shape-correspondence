@@ -3,8 +3,8 @@
 # Re-runs MAIN's exact bear command for 25 steps with --checkpoint_every 5 (no LR schedule, same seed), checks the
 # step-25 weights against the original run, then SMALL analysis per step + one comparison figure.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./demo/shic/shapes/bear.obj
 NAME=shic_bear

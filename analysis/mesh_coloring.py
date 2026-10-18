@@ -37,18 +37,18 @@ and stretch into the pattern -- contaminating exactly the regularity the
 checkerboard exists to show. Quantizing 3D space needs no atlas.
 
 Run (position, the default):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/mesh_coloring.py \
+cd $DISC_ROOT && python analysis/mesh_coloring.py \
   --obj_path ./meshes/guitar.obj
 
 Run (checkerboard, coarser cells):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/mesh_coloring.py \
+cd $DISC_ROOT && python analysis/mesh_coloring.py \
   --obj_path ./meshes/guitar.obj --mode checker --grid 8
 
 Run (PCA of per-vertex features -- --vertex_features_path is mandatory, there is
 deliberately no default: the analysis pipeline has more than one pred_f.pth
 (BSB authors' demo features vs our phase-1 retrain vs phase-2 checkpoints) and
 they are not interchangeable):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/mesh_coloring.py \
+cd $DISC_ROOT && python analysis/mesh_coloring.py \
   --obj_path ./meshes/guitar.obj --mode pca \
   --vertex_features_path ./experiments/guitar/encoder_dino/pred_f.pth
 
@@ -62,7 +62,7 @@ in demo/guitar/bsb/ nor to phase-2 in demo/guitar/phase2/):
 To render one (slow, >120s of kaolin JIT warm-up -- run it in the background;
 note render_colored_mesh.py still defaults --save_dir to demo/guitar/bsb/, since
 that default is shared with the older pipeline, so pass it explicitly):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/render_colored_mesh.py \
+cd $DISC_ROOT && python analysis/render_colored_mesh.py \
   --ply_path ./demo/guitar/colored_mesh/guitar_mesh_checker12_color.ply \
   --save_dir ./demo/guitar/colored_mesh/ --render_res 512
 """

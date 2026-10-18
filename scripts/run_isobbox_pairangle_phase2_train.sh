@@ -14,8 +14,8 @@
 #                the correspondence.
 # Base recipe = the isobbox T=1 baseline (Tal's arm on this mesh), everything else identical.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
 
 W=$1

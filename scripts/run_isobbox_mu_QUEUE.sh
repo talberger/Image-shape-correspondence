@@ -14,8 +14,8 @@
 # _nbrmix when NBR_OUT != 0 and _logfit when MU_FIT=log. e.g. NBR_IN=16 NBR_OUT=0 learned:segment -> _mu_learn_perseg.
 # Output demo dirs land in demo/guitar/runs/isobbox_prop/.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 [ $# -ge 1 ] || { echo "usage: $0 <mode:scope> [<mode:scope> ...]"; exit 1; }

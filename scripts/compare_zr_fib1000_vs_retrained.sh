@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # ZR comparison (2026-08-15, Tal's request): phase-1 with the new --view_sampling fibonacci
 # scheme (encoder_dino_fib1000) vs. the original phase-1 (bsb_retrained), no phase-2 fine-tuning

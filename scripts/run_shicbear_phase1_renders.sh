@@ -16,8 +16,8 @@
 #     honest first pass, not a guess dressed as a decision -- revisit if the trained renders look
 #     oddly weighted toward one angle.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./demo/shic/shapes/bear.obj
 NAME=shic_bear

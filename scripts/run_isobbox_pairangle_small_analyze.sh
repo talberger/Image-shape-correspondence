@@ -11,7 +11,7 @@
 # Both names are derived here, once, from a single arm argument so they cannot drift apart again.
 set -euo pipefail
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
-cd /workspace/bsb
+cd ${DISC_ROOT:-/workspace/disc}
 
 MODE=${1:-}
 W=${2:-0.01}

@@ -2,8 +2,8 @@
 # Visual gate for the --dino_phases 4 phase-2 arms (2026-09-07): back-projection (top1k + soft),
 # the 9 tracked pixels, PCA and sim heatmap, at read T=1 (every isobbox eval on record uses T=1).
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 T=$1
 OBJ=./meshes/guitar_isotropic_bboxnorm.obj
 MASK=demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth

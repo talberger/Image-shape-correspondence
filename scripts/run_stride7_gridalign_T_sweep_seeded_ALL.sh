@@ -6,9 +6,9 @@
 # encoder_checkpoint.pth, pred_f.pth, run_config.json and relational_loss.png are kept, which is
 # everything the eval needs. Full loss/drift trace stays in the log.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
-E=/workspace/bsb/experiments/guitar
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
+E=$DISC_ROOT/experiments/guitar
 EL=demo/guitar/eval_labels
 
 for T in 1 0.01 0.001; do
@@ -18,7 +18,7 @@ for T in 1 0.01 0.001; do
   ./run_stride7_gridalign_T${T}_seed0_phase2_train.sh > $L/gridalign_T${T}_seed0_train.log 2>&1
 
   echo "===== [eval] T=$T seed 0 ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/eval_geodesic_error.py \
       --run_label "stride7 gridalign T=$T seed0" \
       --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth \
@@ -34,7 +34,7 @@ for T in 1 0.01 0.001; do
 done
 
 echo "===== [compare] 4-way, all --train_seed 0 ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/compare_eval_runs.py \
     --runs $EL/eval_stride7_gridalign_T1_seed0.pth $EL/eval_stride7_gridalign_T0.1_seed0.pth \
            $EL/eval_stride7_gridalign_T0.01_seed0.pth $EL/eval_stride7_gridalign_T0.001_seed0.pth \

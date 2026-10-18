@@ -26,15 +26,15 @@ coherence, `position` reads global smoothness, `pca` shows what the features the
 encode. All three come from mesh_coloring.py.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/color_image_from_knn.py \
+cd $DISC_ROOT && python analysis/color_image_from_knn.py \
   --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth
 
 Run (blend the 10 nearest vertices instead of taking the best one):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/color_image_from_knn.py \
+cd $DISC_ROOT && python analysis/color_image_from_knn.py \
   --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth --k 10
 
 Run (against the xyz coloring rather than the checkerboard):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/color_image_from_knn.py \
+cd $DISC_ROOT && python analysis/color_image_from_knn.py \
   --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth \
   --vertex_colors_path ./demo/guitar/colored_mesh/guitar_mesh_position_color.pth
 

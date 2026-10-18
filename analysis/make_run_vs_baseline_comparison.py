@@ -24,7 +24,7 @@ coverage the script actually used is always printed at run time, so a stale defa
 silent.
 
 Run (DINOv3 example, reproduces the 2026-08-25 one-off exactly):
-cd /workspace/bsb && python analysis/make_run_vs_baseline_comparison.py \
+cd $DISC_ROOT && python analysis/make_run_vs_baseline_comparison.py \
   --run_label "DINOv3 swap" \
   --run_zs_dir demo/guitar/runs/legacy/bsb_sd_dino_dinov3_dfd_crossview_frontcentered_ZS \
   --run_zs_coverage "465/4036 = 11.52%" \

@@ -20,7 +20,7 @@ encoder_dino_sd_frontcentered/ (Tanh+MSE) is untouched, so this can be discarded
 anything already relied on if the experiment doesn't pan out.
 
 Run (reuses the already-encoded data, so only --start_training is needed):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python train_encoder_dino_sd_l2norm.py \
+cd $DISC_ROOT && python train_encoder_dino_sd_l2norm.py \
   --encoder_data_dir ./data/guitar/encoder_data_frontcentered_dinosd \
   --encoder_model_dir ./experiments/guitar/encoder_dino_sd_frontcentered_l2norm_phase1 \
   --width 2304 --n_classes 2304 --start_training 1

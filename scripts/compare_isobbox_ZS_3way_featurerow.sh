@@ -7,8 +7,8 @@
 # them as simheatmap_row.png. PCA already renders as one row (image | mesh) per arm, so it only
 # needs stacking.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 A=bsb_isobbox_ZS_sdsquare;  LA="ZS sdsquare_fuse16  (2.7% mean err, 87.9/86.2/85.7)"; FA=$PIX_sdsquare_fuse16
@@ -53,4 +53,4 @@ python analysis/stack_images_nway.py \
   --title "ZS PCA, shared basis, one row per arm" \
   --output_path "$OUT/3_features_pca.png"
 
-echo "===== DONE: /workspace/bsb/$OUT ====="
+echo "===== DONE: $DISC_ROOT/$OUT ====="

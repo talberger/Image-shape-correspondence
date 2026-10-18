@@ -4,8 +4,8 @@
 # + LORA-W ALL r4, read at alpha 0.5 -- the same flags as scripts/run_shicbear_loraW.sh.
 # Usage: ANN_ID=117683 bash scripts/run_lvis_instance.sh
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 ANN_ID=${ANN_ID:?}; ALPHA=${ALPHA:-0.5}
 TAG=lvis$ANN_ID

@@ -1,7 +1,7 @@
 #!/bin/bash
 # One-shot: stop the analysis driver as soon as it finishes T=0.01 and reaches T=0.001.
 # Tal's call 2026-08-31: leave the T=0.001 arm for the next pod.
-LOG=/workspace/logs/nosdsquare_ANALYSIS_DRIVER.log
+LOG=${DISC_WS:-/workspace}/logs/nosdsquare_ANALYSIS_DRIVER.log
 until grep -q "step progression\] T=0.001" "$LOG"; do sleep 10; done
 pkill -f "gridalign_nosdsquare_ANALYSIS_ALL"
 sleep 3

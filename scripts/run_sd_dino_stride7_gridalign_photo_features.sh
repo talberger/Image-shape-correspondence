@@ -3,8 +3,8 @@
 # --cpu_postprocess because the full-res 1080x810 x 2304ch tensor OOMs a 16 GB card with both
 # models resident.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 OUT=demo/guitar/features_analyze/dino_sd_stride7_gridalign
 mkdir -p "$OUT"
 time python analysis/extract_dino_sd_features.py \

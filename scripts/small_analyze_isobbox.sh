@@ -18,8 +18,8 @@
 # geodesic diameter 1.9026 vs 1.63806, coverage /4036 vs /3886 -- so read AUC, not raw percentages,
 # and say which mesh a number came from.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 RUN_NAME=$1
 DEMO_NAME=$2

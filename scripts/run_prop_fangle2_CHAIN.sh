@@ -3,14 +3,14 @@
 # (2-point feature cosine, soft mesh feature, in-segment neighbours). Calibrate by gradient norm at MAIN step 25,
 # then three weights (1/10, 1/3, 1/1 of rkd_spatial_dist's grad), then the MAIN + 3 arms comparison.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 python -m py_compile phase2/train_relational_loss.py
 
 echo "===== 1/3 rkd_feat_angle2 calibration at MAIN step 25 ====="
 CK=experiments/guitar/encoder_isobbox_sdsquare_fuse16_truediag2d_mu_learn_perseg_T1_seed0_phase2/encoder_checkpoint_step25.pth
-CAL=/workspace/logs/prop_fangle2_calibrate.log
+CAL=$DISC_WS/logs/prop_fangle2_calibrate.log
 python phase2/train_relational_loss_l2norm.py \
   --obj_path "$OBJ" --name "$NAME" --init_encoder_dir "$PHASE1" \
   --object_mask_path "$MASK" --fine_seg_path "$FINE" --pix_dino_features_path "$PIX_sdsquare_fuse16" \

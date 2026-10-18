@@ -4,8 +4,8 @@
 # --save_raw_path so analysis/dino_sd_overlay_check.py can verify the two maps line up BEFORE the
 # fuse, which is the check Tal asked for.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 B=demo/guitar/features_analyze/dino_sd_commongrid_padded
 C=demo/guitar/features_analyze/dino_sd_commongrid_nopad

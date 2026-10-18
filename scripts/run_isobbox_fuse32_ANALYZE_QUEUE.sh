@@ -3,8 +3,8 @@
 # (features_analyze included, always) on both the ZS and the phase-2 read of sdsquare_fuse32,
 # then every comparison that isolates one axis of the 2x2.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 P1_32=./experiments/guitar/encoder_isobbox_fuse32_phase1

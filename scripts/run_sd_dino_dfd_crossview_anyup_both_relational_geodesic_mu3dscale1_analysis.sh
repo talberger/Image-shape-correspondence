@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Step-progression analysis for the AnyUp-both-sides phase-2 run
 # (encoder_dino_sd_anyup_both_dfd_crossview_relational_geodesic_mu3dscale1_phase2, see

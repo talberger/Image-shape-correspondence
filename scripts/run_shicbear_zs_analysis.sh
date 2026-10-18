@@ -6,8 +6,8 @@
 #   2. NO step progression -- ZS *is* step 0, there are no checkpoints to walk
 # Naming follows the guitar's own ZS convention (demo/guitar/bsb_<phase1_tag>_ZS).
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./demo/shic/shapes/bear.obj
 NAME=shic_bear

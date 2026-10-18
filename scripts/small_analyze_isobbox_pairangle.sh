@@ -22,8 +22,8 @@
 #
 # Usage:  ./small_analyze_isobbox_readT1.sh <RUN_DIR_NAME> <DEMO_DIR_NAME> <EVAL_TAG> [pix_features]
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 RUN_NAME=$1
 DEMO_NAME=$2

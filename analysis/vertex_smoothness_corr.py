@@ -7,7 +7,7 @@ that diagnostic made reusable rather than ad hoc, kept additive/standalone per t
 convention.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/vertex_smoothness_corr.py \
+cd $DISC_ROOT && python analysis/vertex_smoothness_corr.py \
   --pred_f_path experiments/guitar/encoder_dino_sd_frontcentered_l2norm_axisfix_phase1/pred_f.pth \
   --obj_path ./meshes/guitar.obj --n_pairs 3000 --seed 0
 """

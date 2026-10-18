@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # ZR comparison (2026-08-16, Tal's request): three phase-1 ZR checkpoints, no phase-2
 # fine-tuning on any of them. Extends scripts/compare_zr_fib1000_vs_retrained.sh (2026-08-15,

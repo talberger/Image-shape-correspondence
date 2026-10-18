@@ -4,8 +4,8 @@
 #   2. isobbox at --temperature 0.1 + small_analyze
 #   3. isobbox DINO-ONLY (no SD) + small_analyze
 set -uo pipefail
-cd /workspace/bsb
-L=/workspace/logs
+cd ${DISC_ROOT:-/workspace/disc}
+L=${DISC_WS:-/workspace}/logs
 fail=0
 run () { echo "===== $1 ====="; shift; "$@" && echo "  OK" || { echo "  FAILED: $*"; fail=1; }; }
 

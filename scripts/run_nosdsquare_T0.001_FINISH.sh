@@ -8,8 +8,8 @@
 # No pgrep wait loops here on purpose (2026-08-31 section 9: a -f pattern broad enough to match
 # the job also matches any shell that merely mentions it).
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 T=0.001
 OUTROOT=demo/guitar/runs/oldmesh_sweeps/stride7/bsb_sd_dino_stride7_gridalign_nosdsquare_T${T}_seed0_phase2
 RUN=experiments/guitar/encoder_dino_sd_stride7_gridalign_nosdsquare_relational_geodesic_mu3dscale1_T${T}_seed0_phase2
@@ -27,7 +27,7 @@ echo "===== [full analyze, read T=1] T=$T ====="
 grep -h "vertex coverage" $L/nosdsquare_T${T}_seed0_full_analyze.log | tail -1
 
 echo "===== [read at train T=$T] soft mapping + back-projection ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   RT=$OUTROOT/analyze_readT
   mkdir -p "$RT/color_mesh_from_soft_mapping/render" "$RT/back_projection"
   python analysis/color_mesh_from_soft_mapping.py --mask_path "$MASK" --features_path "$PIX" \

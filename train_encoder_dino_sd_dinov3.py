@@ -15,7 +15,7 @@ the SAME renders this script reads, producing
 <encoder_data_dir>/dinov3_raw/<render_res>/target_dinov3_raw_{i}.pt.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python train_encoder_dino_sd_dinov3.py \
+cd $DISC_ROOT && python train_encoder_dino_sd_dinov3.py \
   --encoder_data_dir ./data/guitar/encoder_data_frontcentered_dinosd \
   --dinov3_raw_dir ./data/guitar/encoder_data_frontcentered_dinosd/dinov3_raw/224 \
   --render_res 224

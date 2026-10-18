@@ -6,8 +6,8 @@
 #
 # Output: <neckrings4 run dir>/comparison_vs_oldmesh/
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 N4=bsb_neckrings4_sdsquash_mu_learn_perseg_cycv2T0.05_c1.676e-05_retstride5_T0.01_seed0_phase2

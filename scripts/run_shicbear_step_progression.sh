@@ -4,8 +4,8 @@
 # extremes (top/bottom/left/right of the bounding box) + 2 mid-body points -- a first pick, not a
 # previously-established set like the guitar's "explicit9".
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./demo/shic/shapes/bear.obj
 NAME=shic_bear

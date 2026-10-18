@@ -3,7 +3,7 @@
 # small_analyze gets the aligned photo features as its 4th argument -- without it the analysis would
 # read the run's mesh features against the SQUASH photo features and silently measure a mismatch.
 set -uo pipefail
-cd /workspace/bsb; L=/workspace/logs; fail=0
+cd ${DISC_ROOT:-/workspace/disc}; L=${DISC_WS:-/workspace}/logs; fail=0
 R=encoder_isobbox_dino_sd_stride14_sdsquare_relational_geodesic_mu3dscale1_T1_seed0_phase2
 D=bsb_isobbox_sd_dino_stride14_sdsquare_T1_seed0_phase2
 T=isobbox_stride14_sdsquare_T1_seed0

@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Step-progression analysis for the cross-view-batched DFD phase-2 run
 # (encoder_dino_sd_dfd_crossview_sdaligned_T0.01_seed0_phase2, see PROJECT_NOTES.md

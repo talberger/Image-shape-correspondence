@@ -5,7 +5,7 @@
 # Usage: CLASS=horse ANN_ID=56069 [MERGE=0.015 (default; 0 = no merge)] [SEGONLY=1] [AMODAL=1] [SAM3=1 (mask from SAM 3, no polygon)] [FILLSEG=1 (default since 2026-10-07, Tal: unlabelled pixels join the nearest segment; 0 = off)] [ANALYSIS_ONLY=1] [OUT_DIR=..] [RUNS_DIR=..] bash scripts/debug_twostage_instance.sh
 # ~7.7 min on an RTX 2000 Ada. Output: demo/shic/debug_twostage/<class>_lvis<id>[_merge..][_segonly]/, intermediates in data/densepose_lvis/runs_debug[...]/.
 set -euo pipefail
-source /workspace/activate_bsb.sh; cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
 CLASS=${CLASS:?}; ANN_ID=${ANN_ID:?}; MERGE=${MERGE:-0.015}; TAG=lvis$ANN_ID   # default 1.5% since 2026-10-07 (Tal); MERGE=0 = the old eval recipe
 SEGONLY=${SEGONLY:-0}   # 1 = --out_neighbors_segmented_only
 AMODAL=${AMODAL:-0}     # 1 = occluded object: 2D geodesics through pix2gestalt's amodal mask (scripts/make_amodal_mask.sh, +~2 min)
@@ -69,7 +69,7 @@ if [ "$AMODAL" = 1 ]; then
 # 2026-10-08 (speed): pix2gestalt starts NOW, so its ~70 s of imports + model load overlap with SAM 3 / the fine segments instead of
 # sitting on the critical path after the mask. It waits for the input (or for "mask in one piece, nothing to do") -> $O/chain_pix2gestalt.log
 mkdir -p $D; DABS=$(realpath $D); rm -f $D/${TAG}_amodal.done $D/${TAG}_amodal.failed $D/${TAG}_amodal_input.ready $D/${TAG}_amodal_samples.done
-( cd /workspace/pix2gestalt_repo/pix2gestalt && env -u PYTHONPATH -u CONDA_DEFAULT_ENV PATH=/workspace/pix2gestalt_repo/venv/bin:/usr/local/bin:/usr/bin:/bin \
+( cd $DISC_WS/pix2gestalt_repo/pix2gestalt && env -u PYTHONPATH -u CONDA_DEFAULT_ENV PATH=$DISC_WS/pix2gestalt_repo/venv/bin:/usr/local/bin:/usr/bin:/bin \
     PYTHONPATH=../stubs:taming-transformers:CLIP python ../run_amodal.py --run_dirs $DABS --tags $TAG --n_samples 3 --steps 50 --wait_for_input 900 ) > $O/chain_pix2gestalt.log 2>&1 &
 fi
 FEATW=""

@@ -26,7 +26,7 @@ unduplicated; only the encoder-construction function is swapped.
 
 Run: identical CLI to train_relational_loss.py (this script forwards sys.argv to it unchanged),
 e.g. the L2-norm counterpart of the current-best recipe:
-cd /workspace/bsb && python phase2/train_relational_loss_l2norm.py \
+cd $DISC_ROOT && python phase2/train_relational_loss_l2norm.py \
   --init_encoder_dir ./experiments/guitar/encoder_dino_sd_frontcentered_l2norm_phase1 \
   --object_mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \
   --fine_seg_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_fine_segments.pth \

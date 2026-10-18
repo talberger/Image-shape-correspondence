@@ -15,18 +15,18 @@ The source image should be:
     exactly which real-photo pixels produced the colors in the render.
 
 Run (view grid only):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/render_colored_mesh.py \
+cd $DISC_ROOT && python analysis/render_colored_mesh.py \
   --ply_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_mesh_color_pca_k1.ply
 
 Run (view grid + side-by-side against the pixel-coloring source):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/render_colored_mesh.py \
+cd $DISC_ROOT && python analysis/render_colored_mesh.py \
   --ply_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_mesh_color_pca_k1.ply \
   --source_image_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_pca_color.png
 
 Run (view grid + side-by-side against the clicked-pixels photo, with sphere
 markers on the rendered mesh so the tiny single-vertex dots are actually
 visible, for a --num_pixels run):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/render_colored_mesh.py \
+cd $DISC_ROOT && python analysis/render_colored_mesh.py \
   --ply_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_mesh_color_pca_k1_pix_random5_seed0.ply \
   --source_image_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_mesh_color_pca_k1_pix_random5_seed0_clicked_pixels.png \
   --click_markers_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2_mesh_color_pca_k1_pix_random5_seed0_click_markers.pth

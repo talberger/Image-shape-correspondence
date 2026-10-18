@@ -10,7 +10,7 @@ Reads the per-step eval .pth files that run_isobbox_baseline_stepladder_EVAL.sh 
 ZS eval as step 0, and draws mean error and AUC for all three metrics.
 
 Run:
-cd /workspace/bsb && python analysis/plot_stepladder_eval.py \
+cd $DISC_ROOT && python analysis/plot_stepladder_eval.py \
   --step_dir ./experiments/guitar/encoder_isobbox_sdsquare_fuse16_T1_seed0_phase2_stepladder/stepladder \
   --zs_eval demo/guitar/eval_labels/v2_edge_inset/isobbox/eval_isobbox_ZS_sdsquare_fuse16_v2.pth \
   --output_path <run>/stepladder_eval_curve.png

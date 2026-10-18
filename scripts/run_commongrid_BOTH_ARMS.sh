@@ -6,8 +6,8 @@
 # are identical there). Control already on disk: bsb_sd_dino_dfd_crossview_sdaligned_T0.01_seed0.
 # Sequential -- one GPU job at a time (the 2026-08-29 OOM rule).
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs; EL=demo/guitar/eval_labels
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs; EL=demo/guitar/eval_labels
 # NOT `rm -f $L/commongrid_*.log` -- that glob matches this driver's OWN output file and
 # deleted it mid-run on 2026-08-30. Delete the per-stage logs BY NAME.
 rm -f $L/commongrid_phase1.log $L/commongrid_photo_features.log \
@@ -25,13 +25,13 @@ for N in padded nopad; do
     padded) FP=dino_sd_commongrid_padded/guitar_01_pix_commongrid_padded.pth; ARM=B ;;
     nopad)  FP=dino_sd_commongrid_nopad/guitar_01_pix_commongrid_nopad.pth;   ARM=C ;;
   esac
-  D=/workspace/bsb/experiments/guitar/encoder_dino_sd_commongrid_${N}_T0.01_seed0_phase2
+  D=$DISC_ROOT/experiments/guitar/encoder_dino_sd_commongrid_${N}_T0.01_seed0_phase2
 
   echo "===== [arm $ARM / $N] phase-2 ====="
   ./run_commongrid_${N}_T0.01_phase2_train.sh > $L/commongrid_${N}_train.log 2>&1
 
   echo "===== [arm $ARM / $N] eval ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/eval_geodesic_error.py \
       --run_label "common-grid $N, T=0.01 seed0" \
       --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth \
@@ -49,7 +49,7 @@ for N in padded nopad; do
         | sed -E "s#.*coverage: ([0-9]+/4036) vertices \(([0-9.]+%)\).*#\1 = \2#")
 
   echo "===== [arm $ARM / $N] compare vs the current sd_square control (coverage $COV) ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/make_run_vs_baseline_comparison.py \
       --run_label "arm $ARM: common-grid fuse, SD $N, T=0.01" \
       --run_phase2_dir demo/guitar/runs/legacy/bsb_sd_dino_commongrid_${N}_T0.01_seed0_phase2 \
@@ -62,7 +62,7 @@ for N in padded nopad; do
 done
 
 echo "===== [8/8] 4-way eval graph ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/compare_eval_runs.py \
     --runs $EL/eval_T0.01_phase2.pth $EL/eval_sdaligned_T0.01_seed0.pth \
            $EL/eval_commongrid_padded_T0.01.pth $EL/eval_commongrid_nopad_T0.01.pth \

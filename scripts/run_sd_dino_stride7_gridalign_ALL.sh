@@ -2,8 +2,8 @@
 # End-to-end validation run: stride 7 + gridalign, with the 2026-08-28 speed changes
 # (SD UNet early exit, float16 target cache). Everything from phase-1 to the ground-truth eval.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd ${DISC_ROOT:-/workspace/disc}/scripts
+L=${DISC_WS:-/workspace}/logs
 echo "===== [1/7] phase-1 (precompute + DFD cross-view) ====="; ./run_sd_dino_stride7_gridalign_phase1.sh          > $L/gridalign_phase1.log 2>&1
 echo "===== [2/7] photo features ====="                       ; ./run_sd_dino_stride7_gridalign_photo_features.sh  > $L/gridalign_photo_features.log 2>&1
 echo "===== [3/7] ZS analysis ====="                          ; ./run_sd_dino_stride7_gridalign_ZS.sh              > $L/gridalign_ZS.log 2>&1

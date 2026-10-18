@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Full analysis suite for the AnyUp-photo-ONLY phase-2 run
 # (encoder_dino_sd_anyup_natten_photo_dfd_crossview_relational_geodesic_mu3dscale1_phase2, see

@@ -8,8 +8,8 @@ and flattening the softmax (= contraction) is the cheapest way to comply.
 
 Run from /workspace/bsb. Needs ~8GB RAM for the 3.6GB feature file.
 """
-import sys, torch, numpy as np
-sys.path.insert(0, '/workspace/bsb')
+import sys, os, torch, numpy as np
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.mapping_loss import sample_center_pixels, build_pixel_neighbors
 
 mask = torch.load('./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth')

@@ -6,8 +6,8 @@
 # MU_FIXED (2026-09-28): hand-made frozen ellipses (analysis/make_manual_mu_aniso.py) -- see run_shicbear_mu_lora.sh
 # SWITCH_HYBRID=1 (2026-09-28): two-stage with a HYBRID stage B (8/8); MU_FIXED must then include the global row (--add_global)
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 MU=${MU:-anisoxglobal}; MU_LR=${MU_LR:-5e-2}; NIN=${NIN:-8}; NOUT=${NOUT:-8}; SUFFIX=${SUFFIX:-}; ALPHA=0.5; T=0.01

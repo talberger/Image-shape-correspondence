@@ -9,8 +9,8 @@
 #   env: VS_SECONDARY=1 also compares against the SECONDARY baseline (anchor+cycle+L_dist) -- use it
 #        for any arm that adds a feature-domain term. SMALL analysis by default (SMALL= for full).
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 [ $# -ge 1 ] || { echo "usage: $0 \"<name_tag>|<extra flags>|<label>\" [...]"; exit 1; }

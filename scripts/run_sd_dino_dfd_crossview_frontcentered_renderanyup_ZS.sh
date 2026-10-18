@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # AnyUp verification, RENDER SIDE (item #2/#6): phase-1 checkpoint trained on the AnyUp-upsampled
 # render cache (dino_sd_anyup_f/), compared using the ORIGINAL (bilinear) real-photo features --

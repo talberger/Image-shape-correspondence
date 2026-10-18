@@ -32,8 +32,8 @@
 # It is best read as "the recipe before SD vs the recipe after SD had bedded in", which is a real
 # question, just a coarser one than the isolated ablation.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 OUT=demo/guitar/eval_labels
 PAIRS=$OUT/pixel_vertex_eval_pairs.pth
 

@@ -4,8 +4,8 @@
 # with the soft-snap read temperature taken from READ_T instead of hard-coded 1.0.
 # Env: P2 (encoder dir), RUN (demo dir), PIX (photo features), READ_T, LABEL.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./demo/shic/shapes/bear.obj
 NAME=shic_bear

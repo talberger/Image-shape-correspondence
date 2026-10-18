@@ -8,8 +8,8 @@
 #   cyc_return_stride       5 -> 2    (a LINEAR spacing; exact ratio would be 2.5, 2 is the denser side)
 #   num_center_pixels    2048 -> 2048 (left alone, Tal's call)
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./demo/shic/shapes/bear.obj; NAME=shic_bear
 P1=./experiments/shic_bear/encoder_dfd_crossview_phase1

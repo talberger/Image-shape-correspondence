@@ -3,8 +3,8 @@
 # The eval itself runs at its DEFAULT temperature 1.0 for every run, deliberately -- 'soft mean
 # distance' moves with softmax sharpness and is only comparable at a fixed eval temperature.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 EL=demo/guitar/eval_labels
 python analysis/eval_geodesic_error.py \
   --run_label "stride7 gridalign T=0.1" \

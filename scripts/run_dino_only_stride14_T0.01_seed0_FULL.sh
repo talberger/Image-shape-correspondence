@@ -38,8 +38,8 @@
 #
 # NO ANALYSES (Tal: "אין צורך בכל האנליזות") -- eval only.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 CACHE=dino_only_stride14
 DATA=./data/guitar/encoder_data_frontcentered_dinosd

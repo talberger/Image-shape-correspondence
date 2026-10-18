@@ -7,8 +7,8 @@
 #                                  [eval_tag_A] [eval_tag_B]
 # Everything is read T=1. Both arms must already have been through analyze_isobbox_arm.sh.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 A=$1; LA=$2; B=$3; LB=$4; SUB=$5; TA=${6:-}; TB=${7:-}

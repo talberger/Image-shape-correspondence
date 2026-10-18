@@ -14,7 +14,7 @@ Three questions:
      and how peaked it is -- this is what picks T_q for the anchor.
 
 Run:
-cd /workspace/bsb && python analysis/zs_error_structure_check.py \
+cd $DISC_ROOT && python analysis/zs_error_structure_check.py \
   --save_dir demo/guitar/features_analyze/anchor_precondition
 """
 import argparse

@@ -14,7 +14,7 @@ without it.
 Metric is `geometric snap` by default (`error_hard_snap`), i.e. the eval's first column.
 
 Run (ZS vs phase-2 on the current baseline):
-cd /workspace/bsb && python analysis/render_eval_hits.py \
+cd $DISC_ROOT && python analysis/render_eval_hits.py \
   --evals demo/guitar/eval_labels/v2_edge_inset/isobbox/eval_isobbox_ZS_sdsquare_fuse16_v2.pth \
           demo/guitar/eval_labels/v2_edge_inset/isobbox/eval_isobbox_sdsquare_fuse16_T1_seed0_v2.pth \
   --labels "step 0 (ZS)" "step 300 (phase-2 T=1)" \

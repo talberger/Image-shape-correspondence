@@ -4,8 +4,8 @@
 # each branch is cropped to its own valid region, and the two are fused on a shared grid that keeps
 # SD's resolution instead of downsampling it onto DINO's 16x16.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 OUT=demo/guitar/features_analyze/dino_sd_stride14_B_nopad_commongrid
 mkdir -p "$OUT"
 time python analysis/extract_dino_sd_features.py \

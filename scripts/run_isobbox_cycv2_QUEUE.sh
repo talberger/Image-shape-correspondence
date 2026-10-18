@@ -9,8 +9,8 @@
 # the ratio to the anchor and cycle terms (Adam-equivalent to multiplying ANCHOR_W and c by 1/REL_W).
 # Matched control = the SAME anchor arm without cycle. Small analysis, comparisons vs that control and vs ZS.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 [ $# -ge 1 ] || { echo "usage: $0 <cyc_weight> [<cyc_weight> ...]"; exit 1; }

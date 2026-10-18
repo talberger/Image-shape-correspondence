@@ -4,7 +4,7 @@
 # Reproduces the promoted baseline's run_config.json EXACTLY except --pix_dino_features_path
 # and --out_dir, so the fix is the single variable. Temperature left at its 1.0 default.
 set -euo pipefail
-cd /workspace/bsb
+cd ${DISC_ROOT:-/workspace/disc}
 
 time python phase2/train_relational_loss_l2norm.py \
   --init_encoder_dir ./experiments/guitar/encoder_dino_sd_dfd_crossview_phase1 \

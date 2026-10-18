@@ -2,8 +2,8 @@
 # ISOBBOX baseline recipe at --temperature 10.0 (Tal, 2026-09-03) -- extends the T sweep upward.
 # Phase-1 is reused UNCHANGED: temperature is a phase-2-only knob.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 time python phase2/train_relational_loss_l2norm.py \
   --obj_path ./meshes/guitar_isotropic_bboxnorm.obj --name guitar_isobbox \
   --init_encoder_dir ./experiments/guitar/encoder_isobbox_dino_sd_dfd_crossview_phase1 \

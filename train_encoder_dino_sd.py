@@ -24,7 +24,7 @@ needed there.
 Run (mirrors encoder_dino_frontcentered's own config; --n_views/--width/
 --n_classes are this run's own, since the fused feature dim (2304 = 1280 SD
 + 1024 DINO) differs from plain DINO's 1024):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python train_encoder_dino_sd.py \
+cd $DISC_ROOT && python train_encoder_dino_sd.py \
   --encoder_data_dir ./data/guitar/encoder_data_frontcentered_dinosd \
   --encoder_model_dir ./experiments/guitar/encoder_dino_sd_frontcentered \
   --view_sampling random --frontview_center 0 1.5707963267948966 --frontview_std 4 \

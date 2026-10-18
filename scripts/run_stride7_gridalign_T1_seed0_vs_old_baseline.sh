@@ -6,8 +6,8 @@
 # Output lands in the NEW run's own comparison_vs_old_baseline/ so it does not collide with the
 # comparison_vs_baseline/ dirs that point at the new baseline.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 python analysis/make_run_vs_baseline_comparison.py \
   --run_label "s7 + gridalign, T=1, train_seed 0 -- NEW SEEDED BASELINE" \
   --run_phase2_dir demo/guitar/runs/oldmesh_sweeps/stride7/bsb_sd_dino_stride7_gridalign_T1_seed0_phase2 \

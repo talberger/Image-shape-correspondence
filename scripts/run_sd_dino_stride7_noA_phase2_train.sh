@@ -2,7 +2,7 @@
 # Phase-2 for the stride-7 problem-A A/B (noA). Reproduces the promoted baseline's run_config.json
 # exactly except --init_encoder_dir, --pix_dino_features_path and --out_dir.
 set -euo pipefail
-cd /workspace/bsb
+cd ${DISC_ROOT:-/workspace/disc}
 time python phase2/train_relational_loss_l2norm.py \
   --init_encoder_dir ./experiments/guitar/encoder_dino_sd_stride7_dfd_crossview_phase1 \
   --object_mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \

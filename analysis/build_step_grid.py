@@ -5,7 +5,7 @@ labeled by step number, so a dense step-by-step sweep can be scanned at a glance
 of opening each render individually.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/build_step_grid.py \
+cd $DISC_ROOT && python analysis/build_step_grid.py \
   --side_by_side_glob 'demo/guitar/bsb_mapping_loss_dense50/step{step}/color_mesh_from_knn_k10/render/guitar_01_click_130_140_sam_mask_2_mesh_color_position_k10_pix_random7_seed152_side_by_side.png' \
   --steps 1-50 --cols 10 \
   --output_path demo/guitar/bsb_mapping_loss_dense50/step_progression_grid.png

@@ -4,17 +4,17 @@
 # Same five stages every other arm got, so it drops straight into the comparison.
 # Sequential -- one GPU job at a time (the 2026-08-29 OOM rule).
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 EL=demo/guitar/eval_labels
-D=/workspace/bsb/experiments/guitar/encoder_dino_sd_stride7_gridalign_relational_geodesic_mu3dscale1_T0.5_seed0_phase2
+D=$DISC_ROOT/experiments/guitar/encoder_dino_sd_stride7_gridalign_relational_geodesic_mu3dscale1_T0.5_seed0_phase2
 rm -f $L/gridalign_T0.5_seed0_*.log
 
 echo "===== [1/5] phase-2 T=0.5 ====="
 ./run_stride7_gridalign_T0.5_seed0_phase2_train.sh > $L/gridalign_T0.5_seed0_train.log 2>&1
 
 echo "===== [2/5] eval ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/eval_geodesic_error.py \
     --run_label "stride7 gridalign T=0.5 seed0" \
     --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth \
@@ -33,12 +33,12 @@ COV=$(grep -E "vertex coverage" $L/gridalign_T0.5_seed0_full_analyze.log | tail 
       | sed -E "s#.*coverage: ([0-9]+/4036) vertices \(([0-9.]+%)\).*#\1 = \2#")
 
 echo "===== [5/5] compare vs baseline (coverage $COV) + 5-way T sweep ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/make_run_vs_baseline_comparison.py \
     --run_label "s7 + gridalign, T=0.5, train_seed 0" \
     --run_phase2_dir demo/guitar/runs/oldmesh_sweeps/stride7/bsb_sd_dino_stride7_gridalign_T0.5_seed0_phase2 \
     --run_phase2_coverage "$COV" ) > $L/gridalign_T0.5_seed0_compare.log 2>&1
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/compare_eval_runs.py \
     --runs $EL/eval_stride7_gridalign_T1_seed0.pth $EL/eval_stride7_gridalign_T0.5_seed0.pth \
            $EL/eval_stride7_gridalign_T0.1_seed0.pth $EL/eval_stride7_gridalign_T0.01_seed0.pth \

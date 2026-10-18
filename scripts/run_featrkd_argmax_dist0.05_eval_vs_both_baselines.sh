@@ -5,8 +5,8 @@
 # not in the shared demo/guitar/eval_labels/ dump. Cross-run comparisons Tal asks for explicitly
 # still go to eval_labels/.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 EL=demo/guitar/eval_labels
 OUT=demo/guitar/runs/rkd_feature/bsb_sd_dino_stride14_nosdsquare_featrkd_argmax_dist0.05_ang0_T0.01_seed0_phase2/eval

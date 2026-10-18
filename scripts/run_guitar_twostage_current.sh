@@ -4,8 +4,8 @@
 # (MERGE / FILLSEG). The guitar keeps its own inputs (SAM click mask, features, mesh, phase 1, cycle return stride 5); no amodal
 # (the mask is in one piece). The end of stage 1 is saved and ZS / stage 1 / final are scored on eval v2.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 MERGE=${MERGE:-0.015}; FILLSEG=${FILLSEG:-1}; SWITCH=${SWITCH:-150}; MU_LR=5e-2; T=0.01; ALPHA=0.5

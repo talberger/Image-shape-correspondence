@@ -11,8 +11,8 @@
 # delta is a global loss scale, and Adam (eps=1e-12, single loss term) is invariant to it, so
 # this is L1 exactly, not L1-times-something.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 BASE_RUN=bsb_isobbox_sdsquare_T1_seed0_phase2

@@ -14,7 +14,7 @@ which does per-axis min-max normalization of xyz -> RGB on a point cloud;
 see position_colors() below for how this adapts to 2D.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/pixel_coloring.py \
+cd $DISC_ROOT && python analysis/pixel_coloring.py \
   --mode pca --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth
 """
 

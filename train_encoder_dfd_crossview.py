@@ -19,7 +19,7 @@ New, additive, does not modify train_encoder_dfd.py or anything it imports.
 
 Run (same cache prerequisites as train_encoder_dfd.py -- xyz_bary_f/ and dino_sd_f/ must already
 exist under --encoder_data_dir):
-cd /workspace/bsb && python train_encoder_dfd_crossview.py \
+cd $DISC_ROOT && python train_encoder_dfd_crossview.py \
   --encoder_data_dir ./data/guitar/encoder_data_frontcentered_dinosd \
   --encoder_model_dir ./experiments/guitar/encoder_dino_sd_dfd_crossview_phase1 \
   --width 2304 --n_classes 2304 --batch_size 4096

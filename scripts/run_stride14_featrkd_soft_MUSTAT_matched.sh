@@ -4,8 +4,8 @@
 # beta=0.5 with mean (measured loss ratio at step 25: mean 1.69, max 1.01). These arms raise beta so
 # the feature/spatial ratio matches the mean run's, isolating the NORMALIZER from its strength.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 EL=demo/guitar/eval_labels
 PIX=demo/guitar/features_analyze/dino_sd_stride14_nosdsquare/guitar_01_pix_stride14_nosdsquare.pth
 
@@ -14,7 +14,7 @@ run () {  # $1 = stat, $2 = beta
   local TAG=dist${BETA}_ang0_mu${STAT}
   local OUT=./experiments/guitar/encoder_dino_sd_stride14_nosdsquare_featrkd_soft_${TAG}_T0.01_seed0_phase2
   echo "===== [train] mu=$STAT beta=$BETA ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python phase2/train_relational_loss_l2norm.py \
       --init_encoder_dir ./experiments/guitar/encoder_dino_sd_dfd_crossview_phase1 \
       --object_mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \
@@ -27,7 +27,7 @@ run () {  # $1 = stat, $2 = beta
       --out_dir $OUT ) > $L/featrkd_soft_${TAG}.log 2>&1
   grep "mu references" $L/featrkd_soft_${TAG}.log; grep "final drift" $L/featrkd_soft_${TAG}.log
   echo "===== [eval] mu=$STAT beta=$BETA ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/eval_geodesic_error.py \
       --run_label "featrkd SOFT beta=$BETA, mu=$STAT" \
       --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth --features_path $PIX \

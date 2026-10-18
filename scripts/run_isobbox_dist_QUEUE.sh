@@ -12,8 +12,8 @@
 # Matched control = the SAME anchor+cycle arm without L_dist. Small analysis, comparisons vs that
 # control and vs ZS.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 [ $# -ge 1 ] || { echo "usage: $0 <gamma> [<gamma> ...]"; exit 1; }

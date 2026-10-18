@@ -5,8 +5,8 @@
 # NOTE: these two are the SAME RECIPE. Any visible difference is the (previously unseeded) SD noise,
 # not a recipe effect -- see PROJECT_NOTES.md 2026-08-28, section 4.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 python analysis/make_run_vs_baseline_comparison.py \
   --run_label "stride7 gridalign (re-run, early-exit + fp16)" \
   --run_zs_dir demo/guitar/runs/oldmesh_sweeps/stride7/bsb_sd_dino_stride7_gridalign_ZS \

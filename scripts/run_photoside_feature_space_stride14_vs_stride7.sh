@@ -6,8 +6,8 @@
 # both no sd_square) and read/train temperature (both T=0.01, seed 0) -- stride is the only
 # difference. CPU only; safe to run alongside a GPU job.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 MASK=demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth
 OUT=demo/guitar/runs/oldmesh_sweeps/stride7/bsb_sd_dino_stride7_gridalign_nosdsquare_T0.01_seed0_phase2/comparison_liked_head_to_head/feature_space_photoside

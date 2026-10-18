@@ -28,7 +28,7 @@ counts for eyeballing. Segments are painted largest-first so smaller parts end
 up on top -- the same ordering show_anns uses (modules/utils.py:125).
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python \
+cd $DISC_ROOT && python \
   analysis/build_fine_segments.py
 """
 import argparse

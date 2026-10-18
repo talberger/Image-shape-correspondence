@@ -12,8 +12,8 @@
 # EncoderL2Norm, and Tanh/L2Normalize are both parameter-free, so building the wrong one loads
 # cleanly and silently exports features that are simply wrong.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 RUN=./experiments/guitar/encoder_isobbox_sdsquare_fuse16_T1_seed0_phase2_stepladder
@@ -47,4 +47,4 @@ for s in $STEPS; do
     --plot_path "$OUTDIR/eval_step${s}_v2.png"
 done
 
-echo "===== STEP-LADDER EVAL DONE: /workspace/bsb/$OUTDIR ====="
+echo "===== STEP-LADDER EVAL DONE: $DISC_ROOT/$OUTDIR ====="

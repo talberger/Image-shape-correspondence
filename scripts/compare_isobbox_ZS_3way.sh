@@ -8,8 +8,8 @@
 # recompute. Output goes into the BEST arm's own folder, per the "a run's own comparison lives in
 # that run's folder" rule.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 A=bsb_isobbox_ZS_sdsquare;  LA="ZS sdsquare_fuse16  (2.7% mean err, 87.9/86.2/85.7)"
@@ -70,4 +70,4 @@ python analysis/compare_eval_runs.py \
   --save_path "$OUT/5_eval_v2_3way.png"
 cp "$OUT/5_eval_v2_3way.png" "$RUNS/$A/eval/eval_ZS_3way_v2.png"
 
-echo "===== ZS 3-WAY COMPARISON DONE: /workspace/bsb/$OUT ====="
+echo "===== ZS 3-WAY COMPARISON DONE: $DISC_ROOT/$OUT ====="

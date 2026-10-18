@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Mirrors run_relational_geodesic_mu3dscale1_frontcenteredinit_analysis.sh, but pointed at the
 # 2026-08-17 hole-free mask/fine map (segment_masks_pixel270_370/) and the new 9-point explicit

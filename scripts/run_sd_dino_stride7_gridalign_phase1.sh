@@ -6,8 +6,8 @@
 # NOTE: SD's noise is UNSEEDED (modules/dino_sd_fusion.py), so this will NOT reproduce the promoted
 # run bit-for-bit even in principle; the run-to-run spread it shows is itself the measurement.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 CACHE=dino_sd_stride7_gridalign
 DATA=./data/guitar/encoder_data_frontcentered_dinosd

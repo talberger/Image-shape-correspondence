@@ -2,8 +2,8 @@
 # Ground-truth evaluation (100 hand-labeled pixel<->vertex pairs) for the stride-7 + gridalign
 # validation run, then a four-way comparison against every run it should be judged against.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 EL=demo/guitar/eval_labels
 
 python analysis/eval_geodesic_error.py \

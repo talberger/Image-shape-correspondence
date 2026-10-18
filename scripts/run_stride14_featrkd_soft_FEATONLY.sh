@@ -3,15 +3,15 @@
 # --rkd_spatial_dist_weight 0, so the feature distance loss is the entire objective.
 # beta is then just an overall scale, which Adam cancels -- kept at 1.0 for readability.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 EL=demo/guitar/eval_labels
 PIX=demo/guitar/features_analyze/dino_sd_stride14_nosdsquare/guitar_01_pix_stride14_nosdsquare.pth
 TAG=featonly_dist1.0_ang0
 OUT=./experiments/guitar/encoder_dino_sd_stride14_nosdsquare_featrkd_soft_${TAG}_T0.01_seed0_phase2
 
 echo "===== [train] feature-distance ONLY (relational_weight 0) ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python phase2/train_relational_loss_l2norm.py \
     --init_encoder_dir ./experiments/guitar/encoder_dino_sd_dfd_crossview_phase1 \
     --object_mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \
@@ -26,7 +26,7 @@ grep -E "^step (25|300)/300" $L/featrkd_soft_${TAG}.log | sed 's/(mu_2D[^)]*)//'
 grep "final drift" $L/featrkd_soft_${TAG}.log
 
 echo "===== [eval] ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/eval_geodesic_error.py \
     --run_label "featrkd SOFT, feature-distance ONLY" \
     --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth --features_path $PIX \

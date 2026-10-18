@@ -18,7 +18,7 @@ Default: a single front view (elev=0, azim=90 -- this project's confirmed
 front angle for meshes/guitar.obj). Pass --elev_deg/--azim_deg for more.
 
 Run (both, shared basis):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/pca_feature_compare.py \
+cd $DISC_ROOT && python analysis/pca_feature_compare.py \
   --display both --save_dir ./demo/guitar/features_analyze/pca/ \
   --mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \
   --vertex_features_path ./experiments/guitar/encoder_dino_relational_geodesic_mu3dscale1_frontcenteredinit_newmask/pred_f.pth

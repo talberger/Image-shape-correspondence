@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ISOBBOX at T=1, end to end with the FULL analysis (Tal, 2026-09-02).
 set -uo pipefail
-cd /workspace/bsb; L=/workspace/logs; fail=0
+cd ${DISC_ROOT:-/workspace/disc}; L=${DISC_WS:-/workspace}/logs; fail=0
 run(){ echo "===== $1"; shift; bash -c "$*" && echo "  OK" || { echo "  FAILED"; fail=1; }; }
 run "1/4 phase-2 train T=1"      "./scripts/run_isobbox_T1_phase2_train.sh  > $L/isobbox_T1_train.log 2>&1"
 run "2/4 step progression"        "./scripts/run_isobbox_T1_analysis.sh      > $L/isobbox_T1_stepprog.log 2>&1"

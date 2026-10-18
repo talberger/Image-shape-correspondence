@@ -3,6 +3,7 @@ Model wrappers for feature extraction from large pre-trained vision models.
 """
 from abc import abstractmethod, ABC
 
+import os
 import numpy as np
 import torch
 from torch.nn import functional as F
@@ -38,7 +39,7 @@ class DINOWrapper(ModelWrapper):
         # Python 3.9 env. Original code called
         # torch.hub.load('facebookresearch/dinov2', ...), which pulls
         # upstream `main` and would crash on import.
-        dinov2_local_repo = '/workspace/.cache/dinov2_git'
+        dinov2_local_repo = os.path.join(os.environ.get('DISC_WS', '/workspace'), '.cache', 'dinov2_git')
         if not small:
             self.model = torch.hub.load(dinov2_local_repo, 'dinov2_vitg14_reg', source='local').to(device)
         else:

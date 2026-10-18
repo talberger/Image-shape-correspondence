@@ -4,8 +4,8 @@
 # trains (modules/lora.py). Then SMALL analysis at alpha=1 and at read-time alphas (analysis/export_pred_f_lora_alpha.py).
 # Env: RANK (16), LAYERS (last|all), LR (1e-3), ALPHAS ("0.25 0.5 0.75").
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 RANK=${RANK:-16}; LAYERS=${LAYERS:-last}; LR=${LR:-1e-3}; ALPHAS=${ALPHAS:-"0.25 0.5 0.75"}
 OBJ=./demo/shic/shapes/bear.obj; NAME=shic_bear

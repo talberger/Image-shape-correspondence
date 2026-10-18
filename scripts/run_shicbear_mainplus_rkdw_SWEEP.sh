@@ -3,8 +3,8 @@
 # become visible. --rkd_spatial_dist_weight scales that term alone (Adam-equivalent to scaling anchor, L_dist and cycle
 # by 1/w together). Guitar precedent 2026-09-10: w 0.3 / 0.1. Bear's anchor was weaker (KL 7.5 at w=1), so 0.03 too.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 OBJ=./demo/shic/shapes/bear.obj; NAME=shic_bear
 MASK=./demo/shic/masks/bear3_click_350_300_sam_mask_1.pth
 GEO3D=./experiments/shic_bear/geodesic_tables/shic_bear_geo_table_3d.pth

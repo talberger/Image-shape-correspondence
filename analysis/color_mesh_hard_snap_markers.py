@@ -45,13 +45,13 @@ render_colored_mesh.py's own click markers already use -- vertex order is unaffe
 normalization, so hard_vertex_idx indexes it exactly the same as the raw mesh.
 
 Run (mu3dscale1.1, step300, matching the project's standard 7-pixel seed-152 selection):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/color_mesh_hard_snap_markers.py \
+cd $DISC_ROOT && python analysis/color_mesh_hard_snap_markers.py \
   --mask_path ./demo/guitar/bsb_origin/guitar_01_click_130_140_sam_mask_2.pth \
   --soft_snap_correspondence_path ./demo/guitar/bsb_relational_bbox_norm_mu3dscale1.1/analyze/color_mesh_from_soft_mapping/guitar_01_click_130_140_sam_mask_2_soft_snap_correspondence.pth \
   --color_path ./demo/guitar/bsb_retrained/pixel_coloring/guitar_01_click_130_140_sam_mask_2_position_color.png
 
 Then render directly -- no --click_markers_path needed, the spheres are already in the geometry:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/render_colored_mesh.py \
+cd $DISC_ROOT && python analysis/render_colored_mesh.py \
   --ply_path ./demo/guitar/bsb_relational_bbox_norm_mu3dscale1.1/analyze/color_mesh_from_soft_mapping/guitar_01_click_130_140_sam_mask_2_hard_snap_spheres_pix_random7_seed152.ply \
   --save_dir ./demo/guitar/bsb_relational_bbox_norm_mu3dscale1.1/analyze/color_mesh_from_soft_mapping/render \
   --azim_deg 90 \

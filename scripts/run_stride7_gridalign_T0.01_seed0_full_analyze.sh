@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Full analysis suite for the cross-view-batched DFD phase-2 run
 # (encoder_dino_sd_stride7_gridalign_relational_geodesic_mu3dscale1_T0.01_seed0_phase2, see PROJECT_NOTES.md

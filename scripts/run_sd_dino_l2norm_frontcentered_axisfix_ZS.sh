@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # ZS (zero-shot -- right after phase-1, no phase-2 fine-tuning) analysis for the new L2-normalize
 # SD-DINO phase-1 encoder (experiments/guitar/encoder_dino_sd_frontcentered_l2norm_phase1/), which fixed

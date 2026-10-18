@@ -14,7 +14,7 @@ smaller (raising the input resolution does the latter).
 DINO ONLY -- no SD, no fusion (Tal's call: isolate the problem to DINO first).
 
 Run:
-cd /workspace/bsb && python analysis/compare_dino_patch_stride.py \
+cd $DISC_ROOT && python analysis/compare_dino_patch_stride.py \
   --img_path ./images/guitar_01.png --strides 14 7 \
   --save_dir ./demo/guitar/features_analyze/dino_stride_trick/
 """

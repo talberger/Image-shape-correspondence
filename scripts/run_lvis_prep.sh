@@ -3,8 +3,8 @@
 # data/densepose_lvis/runs/lvis<ann_id> (never deleted). The class's 3D geodesic table is built on its first instance.
 # Usage: CLASS=horse ANN_ID=164135 bash scripts/run_lvis_prep.sh   (then IMG_TAG=lvis<id> CLASS=.. run_shicbear_mu_lora.sh)
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 CLASS=${CLASS:?}; ANN_ID=${ANN_ID:?}; TAG=lvis$ANN_ID; D=data/densepose_lvis/runs/$TAG
 OBJ=./demo/shic/shapes/$CLASS.obj; NAME=shic_$CLASS; GT=./experiments/shic_$CLASS/geodesic_tables
 mkdir -p $D $GT

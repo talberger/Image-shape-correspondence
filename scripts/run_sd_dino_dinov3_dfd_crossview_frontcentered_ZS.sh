@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # ZS (zero-shot -- right after phase-1, no phase-2 fine-tuning) analysis for the DINOv2->DINOv3 swap
 # on top of the cross-view-batched DFD phase-1 encoder

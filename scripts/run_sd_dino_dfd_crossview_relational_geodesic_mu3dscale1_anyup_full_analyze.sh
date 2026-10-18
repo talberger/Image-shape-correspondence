@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # AnyUp verification pass (step #1 of the AnyUp roadmap item, see PROJECT_NOTES.md) --
 # same current-best-recipe phase-2 checkpoint (RUN/PRED_F unchanged, no retraining), only

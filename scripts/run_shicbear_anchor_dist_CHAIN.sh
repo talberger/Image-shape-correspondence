@@ -6,8 +6,8 @@
 #   mainplus  : MAIN (learned per-seg mu, 16 in-seg, cycle c=1.676e-5, T=0.01) + the same anchor + L_dist
 # All weights are the guitar's, NOT recalibrated for the bear. Same bear assets as run_shicbear_main_T.sh.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./demo/shic/shapes/bear.obj
 NAME=shic_bear

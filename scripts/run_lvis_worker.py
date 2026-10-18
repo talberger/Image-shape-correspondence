@@ -29,7 +29,7 @@ this module's __main__ help and PROJECT_NOTES: the same instances run through th
 through the shell script must produce bit-identical checkpoints, and running A,B must equal B,A.
 
 Run:
-cd /workspace/bsb && python scripts/run_lvis_worker.py --ann_ids 117683 1234 --results_dir data/densepose_lvis/results
+cd $DISC_ROOT && python scripts/run_lvis_worker.py --ann_ids 117683 1234 --results_dir data/densepose_lvis/results
 """
 import argparse
 import gc

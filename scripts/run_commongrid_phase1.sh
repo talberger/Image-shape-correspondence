@@ -6,8 +6,8 @@
 # Renders are SQUARE, so square_pad and aspect_nopad are identical here -- which is why arms B and C
 # can share this one phase-1 and only differ in how the PHOTO is framed.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 CACHE=dino_sd_commongrid
 DATA=./data/guitar/encoder_data_frontcentered_dinosd
 DIR=./experiments/guitar/encoder_dino_sd_commongrid_dfd_crossview_phase1

@@ -2,8 +2,8 @@
 # Three-way comparison, 2026-09-15: ZS / in-segment-only + closed-form per-segment mu (best arm of 09-14) /
 # in-segment-only + LEARNED per-segment mu. Assembly only -- all three arms are already analyzed.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 A=$RUNS/bsb_isobbox_ZS_sdsquare;                                   LA="ZS (phase-1 only)"

@@ -12,8 +12,8 @@
 # Dropped vs full_analyze: k=1/k=100 colorings, 9-pixel hard-snap markers, 10-panel summary,
 # and the 12 intermediate step-progression checkpoints.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 SUF=$1
 EVAL_TAG=$2

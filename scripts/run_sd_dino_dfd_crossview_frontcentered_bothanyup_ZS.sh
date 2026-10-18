@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # AnyUp verification, BOTH SIDES together: the AnyUp-trained render-side phase-1 checkpoint,
 # compared using the AnyUp real-photo features -- the "fair" apples-to-apples test vs baseline

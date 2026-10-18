@@ -35,7 +35,7 @@ That is cheap here because it only ever touches the handful of LABELED pixels, n
 masked set.
 
 Run (evaluate the current-best recipe's phase-2 checkpoint):
-cd /workspace/bsb && python analysis/eval_geodesic_error.py \
+cd $DISC_ROOT && python analysis/eval_geodesic_error.py \
   --eval_pairs_path demo/guitar/eval_labels/pixel_vertex_eval_pairs.pth \
   --features_path demo/guitar/features_analyze/dino_sd_poc/guitar_01_pix_dino_sd_features.pth \
   --vertex_features_path experiments/guitar/encoder_dino_sd_dfd_crossview_relational_geodesic_mu3dscale1_phase2/pred_f.pth \

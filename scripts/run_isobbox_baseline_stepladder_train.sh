@@ -6,8 +6,8 @@
 # only --out_dir differs, so the BASELINE ITSELF IS NOT TOUCHED. --checkpoint_every 25 is the
 # default and was always on; the files were lost after the fact, not never written.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 time python phase2/train_relational_loss_l2norm.py \
   --obj_path ./meshes/guitar_isotropic_bboxnorm.obj --name guitar_isobbox \
   --init_encoder_dir ./experiments/guitar/encoder_isobbox_dino_sd_dfd_crossview_phase1 \

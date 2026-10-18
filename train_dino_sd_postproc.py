@@ -23,13 +23,13 @@ or any other training script. Trains a small module on top of an existing frozen
 the cache itself is never modified.
 
 Run (small-scale sanity check first, per this project's own build-discipline):
-cd /workspace/bsb && python train_dino_sd_postproc.py \
+cd $DISC_ROOT && python train_dino_sd_postproc.py \
   --encoder_data_dir ./data/guitar/encoder_data_frontcentered_dinosd \
   --out_dir ./experiments/guitar/dino_sd_postproc \
   --n_views 50 --num_steps 500
 
 Full run:
-cd /workspace/bsb && python train_dino_sd_postproc.py \
+cd $DISC_ROOT && python train_dino_sd_postproc.py \
   --encoder_data_dir ./data/guitar/encoder_data_frontcentered_dinosd \
   --out_dir ./experiments/guitar/dino_sd_postproc \
   --n_views 1000 --num_steps 20000

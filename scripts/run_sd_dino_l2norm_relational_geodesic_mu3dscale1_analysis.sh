@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Step-progression analysis for the SD-DINO L2norm phase-2 run (project's current default
 # recipe as of 2026-08-20, see PROJECT_NOTES.md). Mirrors

@@ -13,9 +13,9 @@
 # checkpoints; being seeded it must reproduce bit-identically, which is checked below.
 # Sequential -- one GPU job at a time (the 2026-08-29 OOM rule).
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
-E=/workspace/bsb/experiments/guitar
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
+E=$DISC_ROOT/experiments/guitar
 EL=demo/guitar/eval_labels
 
 for T in 1 0.01 0.001; do
@@ -25,7 +25,7 @@ for T in 1 0.01 0.001; do
   ./run_stride7_gridalign_T${T}_seed0_phase2_train.sh > $L/gridalign_T${T}_seed0_train.log 2>&1
 
   echo "===== [eval] T=$T seed 0 ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/eval_geodesic_error.py \
       --run_label "stride7 gridalign T=$T seed0" \
       --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth \
@@ -38,7 +38,7 @@ for T in 1 0.01 0.001; do
 done
 
 echo "===== [check] does the seeded T=1 re-run reproduce the first run bit-identically? ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python - <<'PY'
 import torch
 a = torch.load('/tmp/claude-0/-workspace/feba119c-8a68-4f63-bdb4-de0a599d1fd3/scratchpad/pred_f_T1_seed0_run1.pth', map_location='cpu')
@@ -49,7 +49,7 @@ PY
 ) 2>&1 | tail -3
 
 echo "===== [compare] 4-way, all --train_seed 0 ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/compare_eval_runs.py \
     --runs $EL/eval_stride7_gridalign_T1_seed0.pth $EL/eval_stride7_gridalign_T0.1_seed0.pth \
            $EL/eval_stride7_gridalign_T0.01_seed0.pth $EL/eval_stride7_gridalign_T0.001_seed0.pth \

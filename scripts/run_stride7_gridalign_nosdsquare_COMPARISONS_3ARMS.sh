@@ -11,15 +11,15 @@
 #       preference survives (A) and (B) it points at stride/smoothness, which is what the
 #       2026-08-30 effective-rank numbers already suggested.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
-L=/workspace/logs
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
+L=$DISC_WS/logs
 D=demo/guitar
 
 # Wait on a SENTINEL, not on pgrep: a pgrep -f pattern broad enough to match the analysis
 # driver also matches any shell command that merely mentions it, which stalled this same
 # wait earlier today. _stop_after_T0.01.sh writes STOPPED when the T=0.01 arm is done.
-until grep -q STOPPED /workspace/logs/stop_after_T0.01.log 2>/dev/null; do sleep 15; done
+until grep -q STOPPED $DISC_WS/logs/stop_after_T0.01.log 2>/dev/null; do sleep 15; done
 echo "===== analysis finished, building comparisons ====="
 
 LIKED=$D/bsb_sd_dino_dfd_crossview_relational_geodesic_mu3dscale1_T0.01_phase2

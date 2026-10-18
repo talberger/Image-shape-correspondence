@@ -29,7 +29,7 @@ really built from the same random_viewing_angles.pt.
 
 Run (assumes the existing dino_sd_f/ cache and this run's own xyz_bary_f/ cache both already exist
 under --encoder_data_dir; generate the latter with --generate_xyz_targets 1 first if missing):
-cd /workspace/bsb && python train_encoder_dfd.py \
+cd $DISC_ROOT && python train_encoder_dfd.py \
   --encoder_data_dir ./data/guitar/encoder_data_frontcentered_dinosd \
   --encoder_model_dir ./experiments/guitar/encoder_dino_sd_dfd_phase1 \
   --width 2304 --n_classes 2304 --generate_xyz_targets 1 --start_training 1

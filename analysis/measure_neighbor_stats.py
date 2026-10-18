@@ -1,5 +1,5 @@
-import torch, numpy as np, sys
-sys.path.insert(0, '/workspace/bsb')
+import torch, numpy as np, sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.mapping_loss import sample_center_pixels, build_pixel_neighbors
 
 mask = torch.load('./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth')

@@ -5,8 +5,8 @@
 # extent diagnostic.
 # Env: P1 (phase-1 dir, for step0), P2 (phase-2 dir with step checkpoints), RUN (demo dir), PIX, READ_T, LABEL.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 bash scripts/analyze_shicbear_arm.sh
 

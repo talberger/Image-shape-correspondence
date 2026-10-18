@@ -18,7 +18,7 @@ source-photo/rendered-view split specifically):
   bottom row (5):  checker mesh | back-proj k=1 | back-proj soft-snap | hard-snap source | hard-snap render
 
 Run (standard full_analyze layout, defaults match every *_full_analyze.sh in scripts/):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/build_analysis_summary.py \
+cd $DISC_ROOT && python analysis/build_analysis_summary.py \
   --analyze_dir demo/guitar/runs/legacy/bsb_sd_dino_l2norm_relational_geodesic_mu3dscale1_phase2/analyze \
   --output_path demo/guitar/runs/legacy/bsb_sd_dino_l2norm_relational_geodesic_mu3dscale1_phase2/analysis_summary.png
 """

@@ -8,7 +8,7 @@ both color the mesh from the top-1 match and inspect the KNN of a
 chosen pixel.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/pixel_to_vertex_nn.py \
+cd $DISC_ROOT && python analysis/pixel_to_vertex_nn.py \
   --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth
 """
 

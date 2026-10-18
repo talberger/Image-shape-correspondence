@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # ZS (zero-shot -- right after phase-1, no phase-2 fine-tuning) analysis for the cross-view-batched
 # DFD phase-1 encoder (experiments/guitar/encoder_dino_sd_dfd_crossview_phase1/, trained by

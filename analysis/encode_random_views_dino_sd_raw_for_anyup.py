@@ -16,7 +16,7 @@ target_save_{i}.png directly, no bsb imports needed for that, avoids
 duplicating ~1000 images across the handoff).
 
 Run (bsb env, mirrors train_encoder_dino_sd.py's own --encoder_data_dir):
-cd /workspace/bsb && python analysis/encode_random_views_dino_sd_raw_for_anyup.py \\
+cd $DISC_ROOT && python analysis/encode_random_views_dino_sd_raw_for_anyup.py \\
   --encoder_data_dir ./data/guitar/encoder_data_frontcentered_dinosd
 """
 import argparse

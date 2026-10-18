@@ -10,8 +10,8 @@
 # built. Assembly only -- every arm must already have been through analyze_isobbox_arm.sh -- except
 # the one-row similarity strip, which does not exist yet for an arm and is built here.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 MODE=${1:-}
@@ -113,4 +113,4 @@ python analysis/compare_eval_runs.py \
   --save_path "$OUT/5_eval_v2_3way.png"
 cp "$OUT/5_eval_v2_3way.png" "$RUNS/$A/eval/eval_3way_v2.png"
 
-echo "===== 3-WAY ($MODE) DONE: /workspace/bsb/$OUT ====="
+echo "===== 3-WAY ($MODE) DONE: $DISC_ROOT/$OUT ====="

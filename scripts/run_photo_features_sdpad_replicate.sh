@@ -4,8 +4,8 @@
 # unchanged -- what changes is only the pad content, to remove the zero-boundary artifact measured
 # 2026-09-03 (SD per-column norm 210 -> 143 approaching the pad, 300 on the pad itself).
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 OUT=demo/guitar/features_analyze/dino_sd_stride14_sdpad_replicate
 mkdir -p "$OUT"
 time python analysis/extract_dino_sd_features.py \

@@ -3,8 +3,8 @@
 # T=0.01 control, so that the neck-rings arm (which Tal keeps at T=0.01) and the baseline differ by
 # the MESH ALONE. Every flag below is copied from MAIN's own run_config.json.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 T=${T:-0.01}

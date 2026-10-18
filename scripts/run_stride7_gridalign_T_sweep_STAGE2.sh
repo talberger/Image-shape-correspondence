@@ -14,8 +14,8 @@
 # Sequential -- one GPU job at a time (the 2026-08-29 OOM rule: the analysis battery allocates a
 # [chunk, V] tensor in color_mesh_from_soft_mapping and needs most of the 20 GB card).
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 BASE_DEMO=demo/guitar/runs/oldmesh_sweeps/stride7/bsb_sd_dino_stride7_gridalign_T1_seed0_phase2
 BASE_LABEL="s7 + gridalign, T=1, train_seed 0 -- NEW SEEDED BASELINE"
 
@@ -44,7 +44,7 @@ for T in 0.01 0.001; do
 
   echo "===== [compare vs NEW baseline] T=$T seed0  (coverage $COV) ====="
   rm -f $L/gridalign_T${T}_seed0_compare.log
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/make_run_vs_baseline_comparison.py \
       --run_label "s7 + gridalign, T=$T, train_seed 0" \
       --run_phase2_dir demo/guitar/runs/oldmesh_sweeps/stride7/bsb_sd_dino_stride7_gridalign_T${T}_seed0_phase2 \
@@ -57,7 +57,7 @@ done
 # ---- 3. T=0.1: analysis already exists from 2026-08-29; only redo the comparison vs the NEW baseline ----
 echo "===== [compare vs NEW baseline] T=0.1 (reusing its 2026-08-29 analysis) ====="
 rm -f $L/gridalign_T0.1_vs_newbaseline_compare.log
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/make_run_vs_baseline_comparison.py \
     --run_label "s7 + gridalign, T=0.1, train_seed 0" \
     --run_phase2_dir demo/guitar/runs/oldmesh_sweeps/stride7/bsb_sd_dino_stride7_gridalign_T0.1_seed0_phase2 \

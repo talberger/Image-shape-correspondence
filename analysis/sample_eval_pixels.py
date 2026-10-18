@@ -12,7 +12,7 @@ name, robust to picking out of order or re-picking a mistake, rather than relyin
 order alone.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/sample_eval_pixels.py \
+cd $DISC_ROOT && python analysis/sample_eval_pixels.py \
   --mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \
   --num_pixels 100 --seed 0 \
   --out_dir ./demo/guitar/eval_labels

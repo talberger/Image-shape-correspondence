@@ -16,11 +16,11 @@
 # as soon as that instance is scored. With N workers the peak is ~N x 2.1 GB, NOT 132 x anything.
 #
 # Usage:
-#   setsid nohup env NUM_GPUS=4 bash scripts/run_lvis_queue.sh > /workspace/logs/lvis_queue.log 2>&1 &
+#   setsid nohup env NUM_GPUS=4 bash scripts/run_lvis_queue.sh > $DISC_WS/logs/lvis_queue.log 2>&1 &
 #   NUM_GPUS=2 ANN_IDS="904 117683" bash scripts/run_lvis_queue.sh     # a subset, for a smoke test
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 NUM_GPUS=${NUM_GPUS:-1}
 # 2026-09-22: NUM_WORKERS may exceed NUM_GPUS (several workers share a GPU round-robin; RAM is the limit,
@@ -29,7 +29,7 @@ NUM_WORKERS=${NUM_WORKERS:-$NUM_GPUS}; WORKER_ARGS=${WORKER_ARGS:-}
 # CLASS (2026-10-04): bear (default, unchanged) | horse | elephant
 CLASS=${CLASS:-bear}
 RESULTS=${RESULTS:-data/densepose_lvis/results}
-LOGDIR=${LOGDIR:-/workspace/logs}
+LOGDIR=${LOGDIR:-$DISC_WS/logs}
 mkdir -p "$RESULTS" "$LOGDIR"
 
 # The instance list: every ds2_val bear that carries GT points (132 of them), unless overridden.

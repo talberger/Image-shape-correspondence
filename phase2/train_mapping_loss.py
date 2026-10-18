@@ -21,7 +21,7 @@ analysis/ scripts already follow. `git diff baseline-fixed` then shows all of ou
 work without any interleaving into the original code.
 
 Run (from /workspace/bsb, so `modules.*` and `phase2.*` both resolve):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python -m phase2.train_mapping_loss
+cd $DISC_ROOT && python -m phase2.train_mapping_loss
 
 See /workspace/FINE_TUNING_PLAN.md for the full design and the reasoning behind
 each default.

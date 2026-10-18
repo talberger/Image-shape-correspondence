@@ -4,7 +4,7 @@
 # read temperatures is the 2026-08-31 confound, so the eval read T is held at 1 deliberately.
 # The matched read-T=10 back-projection is produced separately as a visual only.
 set -uo pipefail
-cd /workspace/bsb; L=/workspace/logs; fail=0
+cd ${DISC_ROOT:-/workspace/disc}; L=${DISC_WS:-/workspace}/logs; fail=0
 R=encoder_isobbox_dino_sd_stride14_nosdsquare_relational_geodesic_mu3dscale1_T10_seed0_phase2
 D=bsb_isobbox_sd_dino_stride14_nosdsquare_T10_seed0_phase2
 T=isobbox_stride14_nosdsquare_T10_seed0

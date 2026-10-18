@@ -9,8 +9,8 @@
 # Everything else = MAIN: 16 in-segment neighbours, learned per-segment mu, truediag2d, cycle v2
 # T_cyc=0.05 c=1.676e-5 return stride 5 (c NOT recalibrated for T=0.01).
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 export SMALL=1 READ_T=0.01
 EXP=./experiments/guitar

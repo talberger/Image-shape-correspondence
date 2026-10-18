@@ -2,7 +2,7 @@
 LORA-W read-time alpha sweep (2026-09-17): rebuild the encoder as W_phase1 + alpha * B A for each alpha
 and export pred_f, WITHOUT retraining. alpha=0 is phase-1 (ZS), alpha=1 is the trained LORA-W run.
 
-cd /workspace/bsb && python analysis/export_pred_f_lora_alpha.py --obj_path ./demo/shic/shapes/bear.obj --name shic_bear \
+cd $DISC_ROOT && python analysis/export_pred_f_lora_alpha.py --obj_path ./demo/shic/shapes/bear.obj --name shic_bear \
   --phase1_checkpoint experiments/shic_bear/encoder_dfd_crossview_phase1/encoder_checkpoint.pth \
   --lora_checkpoint <phase2 dir>/encoder_checkpoint.pth --alphas 0.25 0.5 0.75 --out_dir <phase2 dir>/alpha
 """

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 OUT=experiments/guitar/encoder_dino_mapping_adjacent
 ANALYSIS=$OUT/analysis

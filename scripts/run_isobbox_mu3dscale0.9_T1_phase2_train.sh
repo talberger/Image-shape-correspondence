@@ -7,8 +7,8 @@
 # (0.99 / 0.95 / 0.9) bracketing both. Expectation on the record: all inside the 1.6-2.4 AUC seed
 # floor, since mu_3d_scale=1 beat 0.5 and 2 decisively (section 1 of the 2026-09-03 entry).
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 time python phase2/train_relational_loss_l2norm.py \
   --obj_path ./meshes/guitar_isotropic_bboxnorm.obj --name guitar_isobbox \
   --init_encoder_dir ./experiments/guitar/encoder_isobbox_dino_sd_dfd_crossview_phase1 \

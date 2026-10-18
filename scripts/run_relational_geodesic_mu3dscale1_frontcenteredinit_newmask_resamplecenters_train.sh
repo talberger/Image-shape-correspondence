@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Same recipe/init/mask as run_relational_geodesic_mu3dscale1_frontcenteredinit_newmask_train.sh
 # (--geodesic --mu_3d_scale 1, init from encoder_dino_frontcentered, 2026-08-17 hole-free mask),

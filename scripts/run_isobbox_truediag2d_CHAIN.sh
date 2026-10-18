@@ -5,8 +5,8 @@
 # analysis/measure_2d_geodesic_diameter.py: 1175.75 px true vs 1171.65 stored, 0.35% low.
 # Only --geo_diag_2d differs from scripts/run_isobbox_sdsquare_T1_phase2_train.sh.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 P2DIR=./experiments/guitar/encoder_isobbox_sdsquare_fuse16_truediag2d_T1_seed0_phase2

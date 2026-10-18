@@ -4,8 +4,8 @@
 # step-25 checkpoint of the baseline step ladder -- the state right after the 11-AUC collapse.
 # Prints, for soft and hard targets, the lambda at which the anchor and relational gradient norms match.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 STEP=${1:-25}

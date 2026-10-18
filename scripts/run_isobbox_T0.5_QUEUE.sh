@@ -2,7 +2,7 @@
 # ISOBBOX at T=0.5, end to end with the FULL analysis (Tal, 2026-09-02).
 # Waits on a PID, never a pgrep -f pattern (2026-08-31 section 9).
 set -uo pipefail
-cd /workspace/bsb; L=/workspace/logs; fail=0
+cd ${DISC_ROOT:-/workspace/disc}; L=${DISC_WS:-/workspace}/logs; fail=0
 if [ -n "${WAIT_PID:-}" ]; then
   echo "waiting for pid $WAIT_PID (the T=1 queue) ..."
   while kill -0 "$WAIT_PID" 2>/dev/null; do sleep 20; done

@@ -3,7 +3,7 @@
 # run_stride14_nosdsquare_T0.01_seed0_analysis.sh with the run/mesh paths swapped and --obj_path
 # passed to every mesh-consuming call -- the default in ~30 scripts here is the OLD mesh.
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Step-progression analysis for the cross-view-batched DFD phase-2 run
 # (encoder_dino_sd_stride14_sdsquare_relational_geodesic_mu3dscale1_T1_seed0_phase2, see PROJECT_NOTES.md

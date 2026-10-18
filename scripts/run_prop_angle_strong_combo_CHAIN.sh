@@ -5,8 +5,8 @@
 #      equal-norm point), cycle unchanged, L_dist at SHIC's 1/50 of the weighted anchor (calibrated here).
 # Then the two comparison sets. One GPU job at a time.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 ANCHOR_W=3.11e-07          # 1/2 of 6.221e-7 (equal grad norm with L_spatial at MAIN step 25)
@@ -19,7 +19,7 @@ echo "===== 1/4 stronger spatial angle ====="
 
 echo "===== 2/4 L_dist calibration at MAIN step 25 (anchor lambda $ANCHOR_W) ====="
 CK=experiments/guitar/encoder_isobbox_sdsquare_fuse16_truediag2d_mu_learn_perseg_T1_seed0_phase2/encoder_checkpoint_step25.pth
-CAL=/workspace/logs/prop_dist_calibrate.log
+CAL=$DISC_WS/logs/prop_dist_calibrate.log
 python phase2/train_relational_loss_l2norm.py \
   --obj_path "$OBJ" --name "$NAME" --init_encoder_dir "$PHASE1" \
   --object_mask_path "$MASK" --fine_seg_path "$FINE" --pix_dino_features_path "$PIX_sdsquare_fuse16" \

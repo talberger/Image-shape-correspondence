@@ -5,9 +5,9 @@
 # The worker scores ZS / end of stage 1 (arm "stageA") / final per instance into $RESULTS/lvis<id>.json and slim-keeps the run dir
 # (~95 MB: alpha pred_f of stage 1 + final, masks, segments; 2026-10-10. WORKER_ARGS="--keep_intermediates" = everything, "--delete_run_dir" = nothing).
 # Usage: CLASS=bear ANN_IDS="76191 904 ..." RESULTS=data/densepose_lvis/results_X RUNS=data/densepose_lvis/runs_X \
-#        setsid nohup bash scripts/run_lvis_sam3_batch.sh >> /workspace/logs/<name>.log 2>&1 < /dev/null &
+#        setsid nohup bash scripts/run_lvis_sam3_batch.sh >> $DISC_WS/logs/<name>.log 2>&1 < /dev/null &
 set -euo pipefail
-source /workspace/activate_bsb.sh; cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
 CLASS=${CLASS:-bear}; ANN_IDS=${ANN_IDS:?}; RESULTS=${RESULTS:?}; RUNS=${RUNS:?}; WORKER_ARGS=${WORKER_ARGS:-}
 mkdir -p $RESULTS/masks $RUNS; RUNS=$(realpath $RUNS); T0=$(date +%s)
 TODO=""; for i in $ANN_IDS; do [ -f $RESULTS/lvis$i.json ] || TODO="$TODO $i"; done   # resumable: scored instances are skipped everywhere
@@ -22,14 +22,14 @@ for i in os.environ['TODO'].split():
 PY
 # MASK CACHE (Tal, 2026-10-11): the SAM 3 mask and the amodal mask depend only on the crop, so they are computed once per instance
 # and reused by every later run. MASK_CACHE=none turns it off.
-MC=${MASK_CACHE:-/workspace/bsb/data/densepose_lvis/mask_cache_sam3/$CLASS}; [ "$MC" = none ] || mkdir -p $MC
+MC=${MASK_CACHE:-$DISC_ROOT/data/densepose_lvis/mask_cache_sam3/$CLASS}; [ "$MC" = none ] || mkdir -p $MC
 NEED=""; for i in $TODO; do
   if [ "$MC" != none ] && [ -f $MC/lvis$i\_sam3_mask.pth ]; then cp $MC/lvis$i\_sam3_mask.p* $RUNS/lvis$i/; else NEED="$NEED $i"; fi
 done
 echo "##### 2. SAM 3 object masks (one process), $(echo $NEED | wc -w) to compute, the rest from $MC [$(( $(date +%s) - T0 )) s] #####"
 TODO_ALL="$TODO"; TODO="$NEED"
-[ -z "$NEED" ] || ( cd /workspace/sam3_repo && env -u PYTHONPATH -u CONDA_DEFAULT_ENV -u CONDA_PREFIX PATH=/workspace/sam3_repo/env/bin:/usr/local/bin:/usr/bin:/bin \
-    HF_HOME=/workspace/.cache/huggingface python run_box_mask.py --image $(for i in $TODO; do echo $RUNS/lvis$i/lvis$i.png; done) \
+[ -z "$NEED" ] || ( cd $DISC_WS/sam3_repo && env -u PYTHONPATH -u CONDA_DEFAULT_ENV -u CONDA_PREFIX PATH=$DISC_WS/sam3_repo/env/bin:/usr/local/bin:/usr/bin:/bin \
+    HF_HOME=$DISC_WS/.cache/huggingface python run_box_mask.py --image $(for i in $TODO; do echo $RUNS/lvis$i/lvis$i.png; done) \
     --out $(for i in $TODO; do echo $RUNS/lvis$i/lvis$i\_sam3_mask.pth; done) 2>&1 | grep 'sam3 mask' )
 TODO="$TODO_ALL"
 echo "##### 3. which masks are split (largest part < 95%) -> amodal inputs [$(( $(date +%s) - T0 )) s] #####"
@@ -56,7 +56,7 @@ if [ -n "$SPLIT" ]; then
     python analysis/prep_amodal_input.py --ann_id $i --class_name $CLASS --out_dir $RUNS/lvis$i --mask_source sam3 | tail -1
   done
   echo "##### 4. pix2gestalt (one process) [$(( $(date +%s) - T0 )) s] #####"
-  ( cd /workspace/pix2gestalt_repo/pix2gestalt && env -u PYTHONPATH -u CONDA_DEFAULT_ENV PATH=/workspace/pix2gestalt_repo/venv/bin:/usr/local/bin:/usr/bin:/bin \
+  ( cd $DISC_WS/pix2gestalt_repo/pix2gestalt && env -u PYTHONPATH -u CONDA_DEFAULT_ENV PATH=$DISC_WS/pix2gestalt_repo/venv/bin:/usr/local/bin:/usr/bin:/bin \
       PYTHONPATH=../stubs:taming-transformers:CLIP python ../run_amodal.py --run_dirs $(for i in $SPLIT; do echo $RUNS/lvis$i; done) \
       --tags $(for i in $SPLIT; do echo lvis$i; done) --n_samples 3 --steps 50 2>&1 | grep 'model load\|samples x\|DONE' )
   for i in $SPLIT; do python analysis/merge_amodal_mask.py --run_dir $RUNS/lvis$i --tag lvis$i | cut -c1-200; done

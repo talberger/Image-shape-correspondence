@@ -9,7 +9,7 @@ plain-DINOv2 pix-features file wherever a script takes --pix_dino_features_path.
 Prerequisite: extract_dinov3_photo_features.py already run (dinov3 env).
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/extract_dino_sd_features_dinov3.py \
+cd $DISC_ROOT && python analysis/extract_dino_sd_features_dinov3.py \
   --dinov3_raw_path ./demo/guitar/features_analyze/dino_sd_dinov3_poc/guitar_01_dinov3_raw.pth \
   --img_path ./images/guitar_01.png \
   --output_path ./demo/guitar/features_analyze/dino_sd_dinov3_poc/guitar_01_pix_dino_sd_dinov3_features.pth

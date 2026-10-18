@@ -17,8 +17,8 @@
 # angle-only run where nothing anchored the scale. If the live-mu runs drift the same way, the
 # anchor is gone -- which is the whole mechanical difference between the two modes.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 EL=demo/guitar/eval_labels
 PIXFEAT=demo/guitar/features_analyze/dino_sd_stride7_gridalign/guitar_01_pix_stride7_gridalign.pth
 
@@ -28,7 +28,7 @@ for cfg in dist0.2_ang0_fixed dist0.2_ang0_live dist0.2_ang0.2_live; do
   echo "########## $cfg : step progression ##########"
   ./run_featrkd_${cfg}_analysis.sh     > $L/featrkd_${cfg}_analysis.log 2>&1
   echo "########## $cfg : eval ##########"
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/eval_geodesic_error.py \
       --run_label "featRKD $cfg" \
       --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth \
@@ -40,7 +40,7 @@ for cfg in dist0.2_ang0_fixed dist0.2_ang0_live dist0.2_ang0.2_live; do
 done
 
 echo "########## comparison: baseline + yesterday's fixed + today's three ##########"
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/compare_eval_runs.py \
     --runs $EL/eval_stride7_gridalign.pth \
            $EL/eval_featrkd_dist0.2_ang0.pth \

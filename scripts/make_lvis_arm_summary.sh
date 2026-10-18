@@ -20,8 +20,8 @@ set -euo pipefail
 # PRECOMPUTED=1: the position colours and SHIC's back-projection are already in $OUT (debug_twostage_instance.sh builds
 # them while the training runs) -- they do not depend on the arm, so they are not rebuilt.
 # KEEP_PLAIN=1 also keeps the standalone back-projection PNGs (debug_twostage_instance.sh moves them out).
-[ "${CONDA_DEFAULT_ENV:-}" = bsb ] || source /workspace/activate_bsb.sh
-cd /workspace/bsb
+[ -n "${DISC_ROOT:-}" ] || source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 ANN_ID=${ANN_ID:?}; PRED_F=${PRED_F:?}; BASE=${BASE:?}
 SHIC_BASE=${SHIC_BASE:-demo/shic/lvis_vs_shic}

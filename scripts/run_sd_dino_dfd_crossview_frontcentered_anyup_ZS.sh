@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # AnyUp verification, ZS (phase-1-only) checkpoint -- a fairer test than the phase-2 pass:
 # phase-1 training never touches the real photo (renders only), so this checkpoint's pred_f

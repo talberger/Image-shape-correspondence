@@ -4,8 +4,8 @@
 # isobbox phase-1 pred_f.pth exactly as the baseline ZS run does. The ONLY difference between this
 # run and demo/guitar/runs/isobbox/bsb_isobbox_ZS_sdsquash/ is $PIXFEAT.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./meshes/guitar_isotropic_bboxnorm.obj
 MASK=demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth

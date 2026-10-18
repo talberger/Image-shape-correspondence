@@ -17,8 +17,8 @@
 #      already resample every step). Tried 2026-08-18 and came out flat -- but that was plain
 #      DINO, old mesh, different recipe. Retested under the overfit framing.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 BASE_RUN=bsb_isobbox_sdsquare_T1_seed0_phase2

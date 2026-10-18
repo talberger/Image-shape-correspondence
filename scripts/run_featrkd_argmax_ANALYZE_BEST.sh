@@ -5,14 +5,14 @@
 # full_analyze at read T=1 -> soft mapping + back-projection at read T=0.01 (the baseline's own
 # read temperature, so the back-projections are comparable) -> comparison vs the baseline.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 if [ -n "${WAIT_PID:-}" ]; then
   echo "waiting for pid $WAIT_PID (beta sweep) ..."
   while kill -0 "$WAIT_PID" 2>/dev/null; do sleep 20; done
 fi
 
-TAG=$( source /workspace/activate_bsb.sh >/dev/null 2>&1; cd /workspace/bsb; python - <<'PY'
+TAG=$( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh" >/dev/null 2>&1; cd $DISC_ROOT; python - <<'PY'
 import torch, glob, os, re
 best, best_tag = -1, None
 for p in sorted(glob.glob('demo/guitar/eval_labels/eval_featrkd_argmax_dist*_ang0.pth')):
@@ -48,7 +48,7 @@ echo "===== [2/4] full analyze (read T=1) ====="
 ./run_featrkd_argmax_${BEST}_full_analyze.sh > $L/featrkd_argmax_${BEST}_full_analyze.log 2>&1
 
 echo "===== [3/4] soft mapping + back-projection at read T=0.01 ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   MASK=demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth
   POSCOLOR=demo/guitar/segment_masks_pixel270_370/pixel_coloring/guitar_01_click_270_370_sam_mask_2_position_color.png
   CHECKER=demo/guitar/colored_mesh/guitar_mesh_checker16_color.pth
@@ -73,7 +73,7 @@ echo "===== [3/4] soft mapping + back-projection at read T=0.01 ====="
 grep -h "vertex coverage" $L/featrkd_argmax_${BEST}_readT.log | tail -1
 
 echo "===== [4/4] comparison vs the baseline ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   BASE=demo/guitar/runs/oldmesh_sweeps/stride14/bsb_sd_dino_stride14_nosdsquare_T0.01_seed0_phase2
   RUN=demo/guitar/$DEMOBASE
   BP=back_projection/guitar_01_click_270_370_sam_mask_2_backproj_guitar_mesh_checker16_color_soft_snap_k1_side_by_side.png

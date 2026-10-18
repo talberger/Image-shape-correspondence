@@ -20,8 +20,8 @@
 # Only the FEATURE CACHE is rebuilt (~36 GB, float32 to match the production cache bit-for-bit in
 # dtype -- float16 would halve it but would confound the comparison with a precision change).
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 DATA=./data/guitar/encoder_data_frontcentered_dinosd_isobbox

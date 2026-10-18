@@ -9,8 +9,8 @@
 # by the feature dimension. A 2304-wide encoder cannot consume 1024-channel features, so capacity
 # rides along with the ablation. Flagged, not solved.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./meshes/guitar_isotropic_bboxnorm.obj
 NAME=guitar_isobbox

@@ -9,8 +9,8 @@
 # diameter, cyc_return_stride 3 (the LVIS recipe, 400-px images; RET_STRIDE overrides), and the LVIS analysis
 # (scripts/make_lvis_arm_summary.sh: soft back-projection + GT markers vs SHIC) instead of the bear3 one.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 MU=${MU:-learn}; MU_LR=${MU_LR:-1e-2}; MU_GRID=${MU_GRID:-6}; SUFFIX=${SUFFIX:-}; ALPHA=0.5
 # MU_FIXED (2026-09-28): a mu_aniso.pth of HAND-MADE ellipses, frozen (globalthenaniso: at the switch; anisoxglobal: all rows from step 0, file needs the global row)

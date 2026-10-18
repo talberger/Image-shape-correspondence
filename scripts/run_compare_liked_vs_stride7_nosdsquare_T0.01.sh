@@ -5,8 +5,8 @@
 # Both: squashed SD framing, train T=0.01, read T=0.01 (the s7 side uses analyze_readT/).
 # Outputs: the n=100 ground-truth eval figure + the back-projection pair Tal named.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 EL=demo/guitar/eval_labels
 D=demo/guitar
 LIKED=$D/bsb_sd_dino_dfd_crossview_relational_geodesic_mu3dscale1_T0.01_phase2

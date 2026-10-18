@@ -9,7 +9,7 @@ directly) and for every synthetic phase-1 render target
 same extraction logic).
 
 Run (Stage 1 POC, real photo):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/extract_dino_sd_features.py \
+cd $DISC_ROOT && python analysis/extract_dino_sd_features.py \
   --img_path ./images/guitar_01.png \
   --save_dir ./demo/guitar/features_analyze/dino_sd_poc/ \
   --output_path ./demo/guitar/features_analyze/dino_sd_poc/guitar_01_pix_dino_sd_features.pth

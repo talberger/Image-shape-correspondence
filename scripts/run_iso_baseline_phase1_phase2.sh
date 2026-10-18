@@ -22,8 +22,8 @@
 #   - eval pairs  demo/guitar/eval_labels/iso/pixel_vertex_eval_pairs.pth  (the same 100 hand
 #     -picked .pp points re-snapped; needed a real fix in join_eval_pixel_labels.py, see notes)
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./meshes/guitar_isotropic.obj
 NAME=guitar_iso

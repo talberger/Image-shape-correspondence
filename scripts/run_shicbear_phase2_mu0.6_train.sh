@@ -6,8 +6,8 @@
 # three different winners depending on the criterion). T=1 is the plain, unbiased default; revisit
 # once there's something to compare it against.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./demo/shic/shapes/bear.obj
 NAME=shic_bear

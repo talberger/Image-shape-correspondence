@@ -21,7 +21,7 @@ plus each vertex query's .ply/.pth (the actual colored-mesh data, not just
 a view).
 
 Run (2 pixel queries + 2 vertex queries -> one combined grid):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/feature_similarity_heatmap.py \
+cd $DISC_ROOT && python analysis/feature_similarity_heatmap.py \
   --query_pixels 151 94 571 206 --query_vertices 2760 1746 \
   --save_dir ./demo/guitar/runs/legacy/bsb_frontcentered_ZR/features_analyze/sim_heatmap/ \
   --mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \

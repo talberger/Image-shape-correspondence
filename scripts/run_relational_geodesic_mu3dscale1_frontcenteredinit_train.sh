@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Phase-2 training, "current best" recipe (--geodesic --mu_3d_scale 1, no cyc_weight/
 # --balance_weight -- see PROJECT_NOTES.md's "Current best recipe" line), but initialized from

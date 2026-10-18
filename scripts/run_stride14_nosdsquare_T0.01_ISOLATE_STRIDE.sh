@@ -7,8 +7,8 @@
 # full_analyze (read T=1) -> soft mapping + back-projection at read T=0.01 -> comparisons.
 # Waits on a PID, never a pgrep -f pattern (2026-08-31 section 9).
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 D=demo/guitar
 EL=demo/guitar/eval_labels
 RUN=experiments/guitar/encoder_dino_sd_stride14_nosdsquare_relational_geodesic_mu3dscale1_T0.01_seed0_phase2
@@ -33,7 +33,7 @@ echo "===== [2/7] phase-2 train, T=0.01, seed 0 ====="
 ./run_stride14_nosdsquare_T0.01_seed0_phase2_train.sh > $L/stride14_nosdsquare_T0.01_seed0_train.log 2>&1
 
 echo "===== [3/7] ground-truth eval (n=100, eval temperature fixed at 1.0 as always) ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/eval_geodesic_error.py \
     --run_label "stride14 no-sd_square T=0.01 seed0" \
     --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth \
@@ -57,7 +57,7 @@ echo "===== [5/7] full analyze, read T=1 ====="
 grep -h "vertex coverage" $L/stride14_nosdsquare_T0.01_seed0_full_analyze.log | tail -1
 
 echo "===== [6/7] soft mapping + back-projection at read T=0.01 ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   RT=$OUTROOT/analyze_readT
   mkdir -p "$RT/color_mesh_from_soft_mapping/render" "$RT/back_projection"
   python analysis/color_mesh_from_soft_mapping.py --mask_path "$MASK" --features_path "$PIX" \
@@ -77,7 +77,7 @@ echo "===== [6/7] soft mapping + back-projection at read T=0.01 ====="
 grep -h "vertex coverage" $L/stride14_nosdsquare_T0.01_seed0_readT.log | tail -1
 
 echo "===== [7/7] comparisons ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   cov () { python - "$1" <<'PY'
 import sys, torch, glob, os
 p = glob.glob(os.path.join(sys.argv[1], 'analyze', 'color_mesh_from_soft_mapping',

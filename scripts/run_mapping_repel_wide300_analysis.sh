@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 TRAIN_DIR=experiments/guitar/encoder_dino_mapping_repel_wide300
 OUT_ROOT=demo/guitar/bsb_mapping_loss_repel_wide300

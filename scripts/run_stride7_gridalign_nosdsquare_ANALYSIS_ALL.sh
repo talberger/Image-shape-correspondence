@@ -13,9 +13,9 @@
 #             analyze_readT/: this is what makes the T=0.01 arm a fair comparison against the
 #             run Tal likes. Skipped for T=1 (identical to pass 1 by construction).
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
-D=/workspace/bsb/demo/guitar
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
+D=$DISC_ROOT/demo/guitar
 MASK=demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth
 POSCOLOR=demo/guitar/segment_masks_pixel270_370/pixel_coloring/guitar_01_click_270_370_sam_mask_2_position_color.png
 CHECKER=demo/guitar/colored_mesh/guitar_mesh_checker16_color.pth
@@ -41,7 +41,7 @@ for T in 1 0.1 0.01 0.001; do
 
   if [ "$T" != "1" ]; then
     echo "===== [read at train T=$T] soft mapping + back-projection ====="
-    ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+    ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
       RT=$OUTROOT/analyze_readT
       mkdir -p "$RT/color_mesh_from_soft_mapping/render" "$RT/back_projection"
       python analysis/color_mesh_from_soft_mapping.py --mask_path "$MASK" --features_path "$PIX" \

@@ -4,8 +4,8 @@
 # Phase-1 is REUSED unchanged: the change is photo-side only, so the mesh side needs nothing.
 # Both temperatures: T=1 (Tal's call on this mesh) and T=0.01 (the eval leader).
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./meshes/guitar_isotropic_bboxnorm.obj
 P1=./experiments/guitar/encoder_isobbox_dino_sd_dfd_crossview_phase1

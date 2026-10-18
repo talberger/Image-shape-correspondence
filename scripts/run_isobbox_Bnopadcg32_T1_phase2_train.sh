@@ -7,8 +7,8 @@
 # correlation 0.290 -> 0.649. Phase-1 is REUSED UNCHANGED and that is correct -- renders are square,
 # so sd_square is a bit-identical no-op on them (verified 2026-08-27).
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 time python phase2/train_relational_loss_l2norm.py \
   --obj_path ./meshes/guitar_isotropic_bboxnorm.obj --name guitar_isobbox \
   --init_encoder_dir ./experiments/guitar/encoder_isobbox_dino_sd_dfd_crossview_phase1 \

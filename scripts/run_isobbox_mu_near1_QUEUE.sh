@@ -3,7 +3,7 @@
 # Train + small_analyze only, no step progression. Matched control in every comparison is the
 # isobbox squash T=1 run -- i.e. mu_3d_scale=1, the same recipe with only this knob changed.
 set -uo pipefail
-cd /workspace/bsb; L=/workspace/logs; fail=0
+cd ${DISC_ROOT:-/workspace/disc}; L=${DISC_WS:-/workspace}/logs; fail=0
 run(){ echo "===== $(date +%H:%M:%S) $1"; shift; bash -c "$*" && echo "  OK" || { echo "  FAILED"; fail=1; }; }
 i=0
 for MU in 0.99 0.95 0.9; do

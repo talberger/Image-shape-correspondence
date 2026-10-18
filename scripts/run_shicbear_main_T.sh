@@ -5,8 +5,8 @@
 # phase-1, 3D/2D geodesic tables, mask, fine segments. cyc_weight = the guitar's 1.676e-5, NOT recalibrated.
 # New for the bear: sd_square fuse16 photo features (bear only had squash) + its true 2D diameter.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 T=${T:-0.01}
 # MU=learn (MAIN) | closed (per-segment closed form, --mu_mode optimal)

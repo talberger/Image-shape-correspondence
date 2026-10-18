@@ -8,8 +8,8 @@
 # lambda values come from scripts/run_isobbox_anchor_CALIBRATE.sh (equal gradient norms at ladder step 25).
 # Each arm gets the full analysis battery, then comparisons against BOTH the phase-2 baseline and ZS.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 MODE=$1; shift

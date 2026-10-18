@@ -8,9 +8,9 @@
 #
 # Coverage numbers are passed in explicitly (the tool never recomputes them) -- 1239/4036 = 30.70%
 # is the soft-snap coverage printed by color_mesh_from_soft_mapping.py in
-# /workspace/logs/T0.001_full_analyze.log.
+# ${DISC_WS:-/workspace}/logs/T0.001_full_analyze.log.
 set -e
-cd /workspace/bsb
+cd ${DISC_ROOT:-/workspace/disc}
 
 python analysis/make_run_vs_baseline_comparison.py \
   --run_label "T=0.001 softmax" \

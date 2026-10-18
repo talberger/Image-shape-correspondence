@@ -8,8 +8,8 @@
 # renders, same T, same seed, same checker, same 100 eval points, same geodesic table. So the eval
 # comparison needs NO cross-mesh rescaling, and the images are directly stackable.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 ARM_DIR=demo/guitar/$1
 ARM_LABEL=$2

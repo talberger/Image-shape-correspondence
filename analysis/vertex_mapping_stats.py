@@ -14,7 +14,7 @@ Two views of the same per-vertex pixel counts (torch.bincount over top1_vertex_i
      the mask.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/vertex_mapping_stats.py \
+cd $DISC_ROOT && python analysis/vertex_mapping_stats.py \
   --correspondence_path ./demo/guitar/runs/legacy/bsb_relational_geodesic/analyze/color_mesh_from_soft_mapping/guitar_01_click_130_140_sam_mask_2_soft_snap_correspondence.pth
 """
 

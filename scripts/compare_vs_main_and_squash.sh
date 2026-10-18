@@ -8,8 +8,8 @@
 #
 # Usage: ./compare_vs_main_and_squash.sh <arm_demo_run> <arm_label> <arm_eval_tag>
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 # MAIN always lives in the isobbox frame; an arm on another mesh sources its own override BELOW,

@@ -24,7 +24,7 @@ constructing the Encoder reproduces pred_f.pth to float32 noise (mean cosine
 cosine 0.673 and max abs diff 2.0. The gate below separates those cleanly.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python \
+cd $DISC_ROOT && python \
   analysis/verify_encoder_resume.py
 """
 import argparse

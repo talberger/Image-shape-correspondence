@@ -20,7 +20,7 @@ too thin for that -- the neck, the headstock -- take the most interior pixel ava
 within --max_shift instead, i.e. the local ridge.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/inset_eval_pixels.py \
+cd $DISC_ROOT && python analysis/inset_eval_pixels.py \
   --min_edge_dist 20 --out_dir ./demo/guitar/eval_labels/v2_inset
 """
 

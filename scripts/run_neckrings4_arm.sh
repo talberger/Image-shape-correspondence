@@ -8,8 +8,8 @@
 # meshes either, and matching arm 3 matters more here than being optimal -- otherwise the comparison
 # stops isolating vertex density.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 # T is the knob being walked back toward MAIN (Tal, 2026-09-16): the arm that matched arm 3 used
 # T=0.01; T=1 is the first step back. Train T and read T are kept equal, as in the whole squash

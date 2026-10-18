@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Same mask/fine map/tracked-pixel set as
 # run_relational_geodesic_mu3dscale1_frontcenteredinit_newmask_analysis.sh -- just pointed at the

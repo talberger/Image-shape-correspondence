@@ -4,8 +4,8 @@
 # so this is the BASELINE trajectory -- it trains nothing new and its output is thrown away. The
 # only purpose is to choose --rkd_feat_angle2_weight from a measurement instead of a guess.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 # 16 GB GPU on this pod (earlier pods had 24 GB): 4.4 GB was lost to allocator fragmentation
 # (13.53 GiB reserved vs 9.13 GiB allocated) on the first attempt. Capping split size recovers it.
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128

@@ -5,13 +5,13 @@
 # Kept from MAIN: 16 in-segment neighbours, learned per-segment mu, cycle v2 c=1.676e-5 (not recalibrated).
 # SMALL analysis, read T=0.01, no eval (no v2 labels on the old mesh). Waits for the arm 1/2 chain first.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 export OLDMESH=1 SMALL=1 READ_T=0.01
 source scripts/lib_oldmesh_override.sh
 
-until grep -qE "SQUASH SMOOTH CHAIN DONE" /workspace/logs/squash_smooth_chain.log || ! pgrep -f run_squash_smooth_CHAIN.sh >/dev/null; do sleep 30; done
+until grep -qE "SQUASH SMOOTH CHAIN DONE" $DISC_WS/logs/squash_smooth_chain.log || ! pgrep -f run_squash_smooth_CHAIN.sh >/dev/null; do sleep 30; done
 echo "chain finished, starting arm 3"
 
 S3=oldmesh_sdsquash_mu_learn_perseg_cycv2T0.05_c1.676e-05_retstride5_T0.01_seed0

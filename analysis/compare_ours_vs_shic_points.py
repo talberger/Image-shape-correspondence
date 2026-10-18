@@ -28,7 +28,7 @@ Vertex indices are shared: SHIC's bear.obj IS our demo/shic/shapes/bear.obj (493
 bear_4936), which is why one geodesic matrix serves both.
 
 Run:
-cd /workspace/bsb && python analysis/compare_ours_vs_shic_points.py --ann_id 117683 \
+cd $DISC_ROOT && python analysis/compare_ours_vs_shic_points.py --ann_id 117683 \
   --run_dir data/densepose_lvis/runs/lvis117683 \
   --our_pred_f data/densepose_lvis/runs/lvis117683/encoder_loraW_all_r4_phase2/alpha/alpha0.5/pred_f.pth \
   --out_dir demo/shic/lvis_vs_shic

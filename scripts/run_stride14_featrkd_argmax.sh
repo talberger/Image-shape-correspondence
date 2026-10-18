@@ -11,8 +11,8 @@
 #
 # Control = the baseline itself (same features, same phase-1, same seed, same GPU, both weights 0).
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 EL=demo/guitar/eval_labels
 PIX=demo/guitar/features_analyze/dino_sd_stride14_nosdsquare/guitar_01_pix_stride14_nosdsquare.pth
 
@@ -20,7 +20,7 @@ run_arm () {
   TAG=$1; BETA=$2; GAMMA=$3
   OUT=./experiments/guitar/encoder_dino_sd_stride14_nosdsquare_featrkd_argmax_${TAG}_T0.01_seed0_phase2
   echo "===== [train] $TAG  beta=$BETA gamma=$GAMMA ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python phase2/train_relational_loss_l2norm.py \
       --init_encoder_dir ./experiments/guitar/encoder_dino_sd_dfd_crossview_phase1 \
       --object_mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \
@@ -34,7 +34,7 @@ run_arm () {
   grep -E "^step (0|300)\b" $L/featrkd_argmax_${TAG}.log | tail -2
 
   echo "===== [eval] $TAG ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/eval_geodesic_error.py \
       --run_label "featrkd ARGMAX $TAG (stride14 squash T=0.01 seed0)" \
       --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth --features_path $PIX \
@@ -47,7 +47,7 @@ run_arm dist0.2_ang0   0.2 0.0
 run_arm dist0.2_ang0.2 0.2 0.2
 
 echo "===== [compare] vs the baseline control ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/compare_eval_runs.py \
     --runs $EL/eval_stride14_nosdsquare_T0.01_seed0.pth \
            $EL/eval_featrkd_argmax_dist0.2_ang0.pth \

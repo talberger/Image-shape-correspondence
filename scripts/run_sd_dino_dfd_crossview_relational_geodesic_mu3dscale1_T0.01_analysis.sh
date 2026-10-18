@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 # Step-progression analysis for the T=0.01-TRAINED cross-view DFD phase-2 run (see PROJECT_NOTES.md 2026-08-27 T-sweep entry).
 # (encoder_dino_sd_dfd_crossview_relational_geodesic_mu3dscale1_T0.01_phase2, see PROJECT_NOTES.md

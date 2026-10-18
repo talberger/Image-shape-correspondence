@@ -2,7 +2,7 @@
 # ISOBBOX, T=1, mu_3d_scale=2, end to end (Tal, 2026-09-03).
 # small_analyze only -- no full_analyze, and read T=1 throughout (trained at T=1).
 set -uo pipefail
-cd /workspace/bsb; L=/workspace/logs; fail=0
+cd ${DISC_ROOT:-/workspace/disc}; L=${DISC_WS:-/workspace}/logs; fail=0
 R=encoder_isobbox_dino_sd_stride14_nosdsquare_relational_geodesic_mu3dscale2_T1_seed0_phase2
 D=bsb_isobbox_sd_dino_stride14_nosdsquare_mu3dscale2_T1_seed0_phase2
 T=isobbox_stride14_nosdsquare_mu3dscale2_T1_seed0

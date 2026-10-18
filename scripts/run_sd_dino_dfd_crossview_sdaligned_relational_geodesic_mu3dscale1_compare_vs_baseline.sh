@@ -3,7 +3,7 @@
 # ZS half included: the fix changes the photo features, so ZS differs even though the phase-1
 # checkpoint is bit-identical.
 set -e
-cd /workspace/bsb
+cd ${DISC_ROOT:-/workspace/disc}
 python analysis/make_run_vs_baseline_comparison.py \
   --run_label "SD-frame FIX" \
   --run_zs_dir demo/guitar/runs/legacy/bsb_sd_dino_dfd_crossview_frontcentered_sdaligned_ZS \

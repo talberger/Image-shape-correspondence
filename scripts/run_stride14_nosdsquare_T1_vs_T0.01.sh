@@ -4,8 +4,8 @@
 # same seed 0, same GPU (A4500), same pod. The T=0.01 arm already exists from this pod's
 # isolation run; this trains and analyses the T=1 arm and compares the two.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
 EL=demo/guitar/eval_labels
 D=demo/guitar
 RUN=experiments/guitar/encoder_dino_sd_stride14_nosdsquare_relational_geodesic_mu3dscale1_T1_seed0_phase2
@@ -18,7 +18,7 @@ echo "===== [1/5] train T=1 seed0 ====="
 ./run_stride14_nosdsquare_T1_seed0_phase2_train.sh > $L/stride14_nosdsquare_T1_seed0_train.log 2>&1
 
 echo "===== [2/5] eval ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/eval_geodesic_error.py \
     --run_label "stride14 no-sd_square T=1 seed0" \
     --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth --features_path $PIX \
@@ -39,7 +39,7 @@ echo "===== [4/5] full analyze (read T=1) ====="
 grep -h "vertex coverage" $L/stride14_nosdsquare_T1_seed0_full_analyze.log | tail -1
 
 echo "===== [5/5] comparisons ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   # back-projection: T=1 read at 1 vs T=0.01 read at 0.01 -- each arm at its own native read T,
   # which is how each would actually be used as a baseline.
   python analysis/stack_images_labeled.py \

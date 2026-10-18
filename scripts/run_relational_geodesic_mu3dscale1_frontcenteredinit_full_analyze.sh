@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 RUN=experiments/guitar/encoder_dino_relational_geodesic_mu3dscale1_frontcenteredinit
 OUT=demo/guitar/runs/legacy/bsb_relational_geodesic_mu3dscale1_frontcenteredinit/analyze

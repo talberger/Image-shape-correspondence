@@ -8,8 +8,8 @@
 # NOTE: --train_seed 0 makes THIS run reproducible; the run it is compared against predates the
 # flag and is a single unseeded draw.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 time python phase2/train_relational_loss_l2norm.py \
   --init_encoder_dir ./experiments/guitar/encoder_dino_sd_dfd_crossview_phase1 \
   --object_mask_path ./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth \

@@ -15,7 +15,7 @@ average of their colors: the geometric snap distance is not a similarity score, 
 principled weight to use (unlike color_mesh_from_knn.py's cosine-similarity weighting).
 
 Run:
-cd /workspace/bsb && python analysis/color_mesh_from_soft_mapping.py \
+cd $DISC_ROOT && python analysis/color_mesh_from_soft_mapping.py \
   --mask_path ./demo/guitar/bsb_origin/guitar_01_click_130_140_sam_mask_2.pth \
   --features_path ./demo/guitar/bsb_origin/guitar_01_pix_dino_features.pth \
   --vertex_features_path ./experiments/guitar/encoder_dino_relational_bbox_norm/pred_f_step300.pth \

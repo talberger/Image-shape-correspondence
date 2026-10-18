@@ -9,7 +9,7 @@
 #
 # Usage:  bash scripts/run_sd_dino_dfd_crossview_relational_geodesic_mu3dscale1_Tsweep_train.sh 0.01 0.001
 set -euo pipefail
-cd /workspace/bsb
+cd ${DISC_ROOT:-/workspace/disc}
 
 PHASE1=./experiments/guitar/encoder_dino_sd_dfd_crossview_phase1
 MASK=./demo/guitar/segment_masks_pixel270_370/guitar_01_click_270_370_sam_mask_2.pth

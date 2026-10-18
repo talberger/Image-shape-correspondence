@@ -4,8 +4,8 @@
 # ONE change vs experiments/shic_bear/encoder_dfd_crossview_phase1: --frontview_center 0 2.356194490.
 # Then ZS with the MAIN photo features (sd_square fuse16), old vs new phase-1, same read T, + extent diagnostic.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 S=sdsquare_truediag2d_mu_learn_perseg_cycv2T0.05_c1.676e-05_retstride5_T0.01_seed0
 PIX=demo/shic/features_analyze/sdsquare_fuse16/bear3_pix_sdsquare_fuse16.pth

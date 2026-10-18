@@ -80,6 +80,14 @@ Goal (long-term): dense correspondence between an image and a 3D object.
 - **New way of working (Tal):** Mac (MacBook Air M5, 24 GB, CPU only = like a CPU pod) for daily work; GPU on a RunPod pod or on
   TAU's Run:ai cluster. Plan: (1) git = single source of code [done]; (2) portable env spec -> Mac CPU env + Docker image for Run:ai;
   (3) notes in the repo [done, see top of file]; (4) data/results stay on the server, rsync to the Mac only what is needed.
+- **RENAME bsb -> disc (Tal: "we started from BSB but moved elsewhere"):** repo dir `/workspace/disc` (`/workspace/bsb` = symlink, so old
+  run configs / paths still resolve); conda env `disc` (= symlink `miniconda3/envs/disc -> bsb`); paper clone `/workspace/DISC` -> `/workspace/DISC_paper`
+  (avoids a disc/DISC clash on the case-insensitive Mac). GitHub repo rename (Image-shape-correspondence -> disc) left to Tal.
+- **ACTIVATION, every machine: `source <repo>/env/activate.sh`** -> sets `DISC_ROOT` (repo), `DISC_WS` (folder around it: logs, .cache, sam3_repo,
+  pix2gestalt_repo; pod `/workspace`, Mac = repo parent), TORCH_HOME/HF_HOME, activates `disc`, installs the deploy key on a pod, cds to the repo.
+  `/workspace/activate_bsb.sh` (and `activate_disc.sh`) now only source it. All 375 shell scripts use `$DISC_ROOT` / `$DISC_WS` instead of `/workspace/...`.
+- **kaolin is optional** (commit 7be2fa1): lazy import; OBJ files load without it (identical vertices/faces on all 101 repo meshes). Only rendering needs it
+  (= GPU machine). Mac env = `env/requirements_disc_mac.txt` (same versions, CPU torch, no kaolin). Env files for all 3 envs in `env/`.
 - **Run:ai status (from Tal's Claude Desktop session):** Docker Hub user `tberger3`, test image `tberger3/disc:v1` (built `--platform linux/amd64`);
   runai-cli 2.26.51, SSO login OK; project `avidan`, cluster hpc-220711; PVC `tal-disc-data` (lustre-user, RWO, 100G, at /workspace);
   workspace `tberger3-dev` (0 GPU) Running. **Blocked on the TAU VPN** (cluster API reachable only from TAU network).

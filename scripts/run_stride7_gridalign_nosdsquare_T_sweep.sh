@@ -8,9 +8,9 @@
 # trained on an A4500, so cross-framing gaps carry a hardware confound on top of the 1.6 AUC
 # seed-noise floor. Within this sweep all four arms share this GPU and this seed.
 set -e
-cd /workspace/bsb/scripts
-L=/workspace/logs
-E=/workspace/bsb/experiments/guitar
+cd $DISC_ROOT/scripts
+L=$DISC_WS/logs
+E=$DISC_ROOT/experiments/guitar
 EL=demo/guitar/eval_labels
 PIX=demo/guitar/features_analyze/dino_sd_stride7_gridalign_nosdsquare/guitar_01_pix_stride7_gridalign_nosdsquare.pth
 
@@ -21,7 +21,7 @@ for T in 1 0.1 0.01 0.001; do
   ./run_stride7_gridalign_nosdsquare_T${T}_seed0_phase2_train.sh > $L/nosdsquare_T${T}_seed0_train.log 2>&1
 
   echo "===== [eval] T=$T seed 0, no sd_square ====="
-  ( source /workspace/activate_bsb.sh; cd /workspace/bsb
+  ( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
     python analysis/eval_geodesic_error.py \
       --run_label "stride7 gridalign no-sd_square T=$T seed0" \
       --eval_pairs_path $EL/pixel_vertex_eval_pairs.pth \
@@ -34,7 +34,7 @@ for T in 1 0.1 0.01 0.001; do
 done
 
 echo "===== [compare] 4-way T sweep, no sd_square ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   python analysis/compare_eval_runs.py \
     --runs $EL/eval_stride7_gridalign_nosdsquare_T1_seed0.pth \
            $EL/eval_stride7_gridalign_nosdsquare_T0.1_seed0.pth \
@@ -44,7 +44,7 @@ echo "===== [compare] 4-way T sweep, no sd_square ====="
     --save_path $EL/eval_compare_stride7_gridalign_nosdsquare_T_sweep.png ) > $L/nosdsquare_T_sweep_compare.log 2>&1
 
 echo "===== [compare] sd_square A/B at matched T, all seed 0 ====="
-( source /workspace/activate_bsb.sh; cd /workspace/bsb
+( source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
   for T in 1 0.1 0.01 0.001; do
     python analysis/compare_eval_runs.py \
       --runs $EL/eval_stride7_gridalign_T${T}_seed0.pth \

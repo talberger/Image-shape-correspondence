@@ -2,8 +2,8 @@
 # RESUME of run_iso_baseline_phase1_phase2.sh from stage 1b (2026-09-02).
 # Stage 1 (renders + 36 GB DINO+SD cache) already completed; skipped here so it is not redone.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./meshes/guitar_isotropic.obj
 NAME=guitar_iso

@@ -9,8 +9,8 @@
 # apart on the mesh. 0.5 was catastrophic (51.4 AUC, coverage 13.7%); 0.9 was fine (75.5). This
 # fills the gap between them.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 for MU in 0.75 0.8 0.85; do

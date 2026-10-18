@@ -2,8 +2,8 @@
 # FULL analysis of the NEW MAIN BASELINE of 2026-09-15 (in-segment-only neighbours + LEARNED per-segment mu):
 # the per-arm battery WITH mesh renders (SMALL unset), then the step progression.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 unset SMALL
 

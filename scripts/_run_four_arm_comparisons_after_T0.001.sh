@@ -6,5 +6,5 @@ set -e
 if [ -n "${WAIT_PID:-}" ]; then
   while kill -0 "$WAIT_PID" 2>/dev/null; do sleep 20; done
 fi
-cd /workspace/bsb/scripts
+cd ${DISC_ROOT:-/workspace/disc}/scripts
 exec ./run_stride7_gridalign_nosdsquare_COMPARISONS.sh

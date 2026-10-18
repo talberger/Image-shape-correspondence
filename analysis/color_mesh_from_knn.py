@@ -8,20 +8,20 @@ similarity-weighted average; a vertex touched by none is colored neutral
 gray. Output is an ASCII .ply, viewable in MeshLab.
 
 Run (pca colors, pixel_coloring.py's default mode):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/color_mesh_from_knn.py \
+cd $DISC_ROOT && python analysis/color_mesh_from_knn.py \
   --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth --k 1
 
 Or with pixel_coloring.py's --mode position colors instead (e.g. as a correspondence sanity
 check independent of the DINO features: smooth position colors should stay
 roughly smooth across the mesh if the feature-based correspondence respects
 spatial locality):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/color_mesh_from_knn.py \
+cd $DISC_ROOT && python analysis/color_mesh_from_knn.py \
   --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth --k 1 \
   --color_mode position
 
 To paint from only a handful of pixels (e.g. to trace exactly where each one
 lands, rather than an all-pixels average that hides individual contributions):
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/color_mesh_from_knn.py \
+cd $DISC_ROOT && python analysis/color_mesh_from_knn.py \
   --mask_path ./demo/guitar/bsb/guitar_01_click_130_140_sam_mask_2.pth --k 1 \
   --num_pixels 5 --seed 0
 This also saves a `*_clicked_pixels.png`: the original photo with each of the

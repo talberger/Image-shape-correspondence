@@ -24,7 +24,7 @@ computed once and reused across every geodesic training run on this mesh/mask:
     mask (can cross between segments), NOT constrained to stay within one fine segment.
 
 Run:
-cd /workspace/bsb && /workspace/miniconda3/envs/bsb/bin/python analysis/build_geodesic_tables.py \\
+cd $DISC_ROOT && python analysis/build_geodesic_tables.py \\
   --object_mask_path ./demo/guitar/bsb_origin/guitar_01_click_130_140_sam_mask_2.pth \\
   --fine_seg_path ./demo/guitar/phase2/guitar_01_fine_segments.pth \\
   --num_center_pixels 2048 --seed 0 \\

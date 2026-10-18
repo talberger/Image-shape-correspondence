@@ -12,8 +12,8 @@
 # --dino_phases 4 keeps --sd_frame square_pad (the script's default, and the new recipe's framing);
 # it REFUSES --fuse_mode common_grid / --fix_grid_alignment / --dino_patch_stride / --save_raw_path.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 
 FEATDIR=demo/guitar/features_analyze/dino_sd_sdsquare_phase4

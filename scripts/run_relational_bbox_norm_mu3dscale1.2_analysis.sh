@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source /workspace/activate_bsb.sh
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
 
 TRAIN_DIR=experiments/guitar/encoder_dino_relational_bbox_norm_mu3dscale1.2
 OUT_ROOT=demo/guitar/bsb_relational_bbox_norm_mu3dscale1.2

@@ -5,8 +5,8 @@
 # (demo/shic/bear3_<run>/analyze/{back_projection,features_analyze/{pca,sim_heatmap},ours,ours_soft,
 # soft_mapping}, step0..step300 directly under the run dir).
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 MU=$1
 [ -z "$MU" ] && { echo "usage: $0 <mu_3d_scale>"; exit 1; }

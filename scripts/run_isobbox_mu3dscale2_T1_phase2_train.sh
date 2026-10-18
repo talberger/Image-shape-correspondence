@@ -8,8 +8,8 @@
 # and ~24 AUC below the mu=1 control. Expected mu_3D_live if the loss converges the same way:
 # ~1.14 (0.569 * 2), vs 0.569 at mu=1 and 0.291 at mu=0.5.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 time python phase2/train_relational_loss_l2norm.py \
   --obj_path ./meshes/guitar_isotropic_bboxnorm.obj --name guitar_isobbox \
   --init_encoder_dir ./experiments/guitar/encoder_isobbox_dino_sd_dfd_crossview_phase1 \

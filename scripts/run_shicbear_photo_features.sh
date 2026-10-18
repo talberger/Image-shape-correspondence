@@ -5,8 +5,8 @@
 # distortion (BUG B) is much milder here than on the guitar's 1080x810 photo.
 # --cpu_postprocess: the full-res [750,808,2304] tensor OOMs a 16GB card alongside DINO+SD.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OUT=demo/shic/features_analyze/stride14_squash
 mkdir -p "$OUT"

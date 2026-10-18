@@ -7,7 +7,7 @@
 # small_analyze only, no step progression. Its matched control is the isobbox T=1 SQUASH run, which
 # is exactly the baseline comparison asked for.
 set -uo pipefail
-cd /workspace/bsb; L=/workspace/logs; fail=0
+cd ${DISC_ROOT:-/workspace/disc}; L=${DISC_WS:-/workspace}/logs; fail=0
 run(){ echo "===== $(date +%H:%M:%S) $1"; shift; bash -c "$*" && echo "  OK" || { echo "  FAILED"; fail=1; }; }
 
 RA=encoder_isobbox_dino_sd_stride14_sdpadreplicate_relational_geodesic_mu3dscale1_T1_seed0_phase2

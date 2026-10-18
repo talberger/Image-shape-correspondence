@@ -4,8 +4,8 @@
 # distance' moves with softmax sharpness and is only comparable at a fixed eval temperature. Same
 # convention as the 2026-08-27 T sweep.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 EL=demo/guitar/eval_labels
 python analysis/eval_geodesic_error.py \
   --run_label "stride7 gridalign T=0.001" \

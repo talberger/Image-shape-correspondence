@@ -15,7 +15,7 @@ Table 1 (bear: SHIC 33.0, CSE 35.7, zero-shot SD-DINO 48.2).
 Inputs are the files the other scripts already wrote; this only composes them.
 
 Run:
-cd /workspace/bsb && python analysis/make_lvis_summary_figure.py --ann_id 117683 \
+cd $DISC_ROOT && python analysis/make_lvis_summary_figure.py --ann_id 117683 \
   --base demo/shic/lvis_vs_shic --run_dir data/densepose_lvis/runs/lvis117683 \
   --output_path demo/shic/lvis_vs_shic/SUMMARY_lvis117683.png
 """

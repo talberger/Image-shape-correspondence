@@ -9,9 +9,9 @@
 #       preference survives (A) and (B) it points at stride/smoothness, which is what the
 #       2026-08-30 effective-rank numbers already suggested.
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
-L=/workspace/logs
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
+L=$DISC_WS/logs
 D=demo/guitar
 
 while pgrep -f "gridalign_nosdsquare_ANALYSIS_ALL" >/dev/null; do sleep 20; done

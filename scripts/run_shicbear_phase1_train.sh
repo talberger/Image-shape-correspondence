@@ -3,8 +3,8 @@
 # (2026-09-03). Same recipe as the guitar's current baseline, script 2/4 of
 # scripts/run_isobbox_baseline_phase1_phase2.sh, pointed at the bear instead.
 set -euo pipefail
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 
 OBJ=./demo/shic/shapes/bear.obj
 NAME=shic_bear

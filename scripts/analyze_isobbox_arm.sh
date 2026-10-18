@@ -11,8 +11,8 @@
 #   pix_features_path : the photo features, i.e. WHICH FUSE ARM this is
 #   eval_tag      : if given, also runs the v2 ground-truth eval into <EVALDIR>/eval_<tag>_v2.pth
 set -e
-source /workspace/activate_bsb.sh
-cd /workspace/bsb
+source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"
+cd $DISC_ROOT
 source scripts/lib_isobbox_common.sh
 [ -n "$OLDMESH" ] && source scripts/lib_oldmesh_override.sh
 [ -n "$NECKRINGS4" ] && source scripts/lib_neckrings4_override.sh
