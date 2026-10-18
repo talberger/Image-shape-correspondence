@@ -3,8 +3,14 @@ import os
 import re
 import torch
 import torch.nn.functional as F
-import kaolin as kal
-import kaolin.ops.mesh
+class _LazyKaolin:
+    """kaolin is imported on first use (2026-10-18): it has no macOS build, and the Mac env runs
+    everything here except rendering, which is the only code that reaches kaolin."""
+    def __getattr__(self, name):
+        import kaolin
+        import kaolin.ops.mesh
+        return getattr(kaolin, name)
+kal = kaolin = _LazyKaolin()
 from collections import OrderedDict
 class _LazyOpen3d:
     """open3d is imported on first use (2026-10-07): importing it costs ~10 s per process from the

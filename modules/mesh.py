@@ -1,5 +1,11 @@
-import kaolin as kal
 import torch
+from types import SimpleNamespace
+try:
+    import kaolin as kal
+except ImportError:
+    # No kaolin on the Mac (2026-10-18): OBJ loading falls back to _import_obj_plain below;
+    # rendering still needs kaolin + CUDA and runs on a GPU machine only.
+    kal = None
 import modules.utils as utils
 class _LazyOpen3d:
     """open3d is imported on first use (2026-10-07): importing it costs ~10 s per process from the
@@ -18,11 +24,36 @@ if torch.cuda.is_available():
 else:
     device = torch.device("cpu")
 
+def _import_obj_plain(path, with_normals=False):
+    """kaolin-free OBJ reader: same vertices / faces as kal.io.obj.import_mesh(path) without materials
+    (all 'v' lines in order; first index of each 'f' corner, 0-based; uniform face size required)."""
+    if with_normals:
+        raise NotImplementedError("with_normals=True needs kaolin")
+    vertices, faces = [], []
+    with open(path) as f:
+        for line in f:
+            data = line.split()
+            if not data:
+                continue
+            if data[0] == 'v':
+                vertices.append(data[1:])
+            elif data[0] == 'f':
+                faces.append([int(d.split('/')[0]) for d in data[1:]])
+    if len({len(f) for f in faces}) > 1:
+        raise ValueError(f"Mesh is non-homogeneous and cannot be imported from {path}.")
+    vertices = torch.FloatTensor([float(el) for v in vertices for el in v]).view(-1, 3)
+    return SimpleNamespace(vertices=vertices, faces=torch.LongTensor(faces) - 1,
+                           vertex_normals=None, face_normals=None)
+
+
 class Mesh():
     def __init__(self,obj_path, color=torch.tensor([0.0,0.0,1.0]), with_normals=False):
         if ".obj" in obj_path:
             # obj loader
-            mesh = kal.io.obj.import_mesh(obj_path, with_normals=with_normals)
+            if kal is not None:
+                mesh = kal.io.obj.import_mesh(obj_path, with_normals=with_normals)
+            else:
+                mesh = _import_obj_plain(obj_path, with_normals=with_normals)
         elif ".off" in obj_path:
             mesh = kal.io.off.import_mesh(obj_path)
         else:

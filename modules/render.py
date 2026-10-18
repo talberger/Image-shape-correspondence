@@ -1,5 +1,5 @@
 from modules.mesh import Mesh
-import kaolin as kal
+from modules.utils import kal  # lazy: kaolin is loaded on the first render call
 from modules.utils import get_camera_from_view2
 import matplotlib.pyplot as plt
 from modules.utils import device
@@ -21,7 +21,7 @@ class Renderer():
 
     def __init__(self, mesh='sample.obj',
                  lights=torch.tensor([1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
-                 camera=kal.render.camera.generate_perspective_projection(np.pi / 3).to(device),
+                 camera=None,
                  dim=(224, 224), radius=2.):
 
         if camera is None:
