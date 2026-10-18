@@ -69,7 +69,13 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
-## 2026-10-18 (forty-ninth pod, CPU only) — CLEANUP + START OF THE MULTI-MACHINE SETUP. **NOTHING RAN.**
+## STATE AT POD CLOSE — 2026-10-18 (forty-ninth pod, CPU only) — CLEANUP + MULTI-MACHINE SETUP. **NOTHING IS RUNNING, NOTHING WAS TRAINED.** Tal closes the pod.
+**NEXT SESSION = ON THE MAC (Tal, 10-18):** `cd ~/Projects/disc && git pull && source env/activate.sh`, then read this file.
+- **Open, in order:** (1) Tal finishes the TAU VPN (in progress) -> `runai workspace bash tberger3-dev` check (python, `df -h /workspace`, write test);
+  (2) Dockerfile for Run:ai from `env/requirements_disc_gpu.txt` (+ external/ scripts; SAM 3 / pix2gestalt envs later), built on the Mac with Docker Desktop
+  `--platform linux/amd64`, pushed as `tberger3/disc` (the `:v1` image was only a smoke test, not the project env); (3) research resumes from the pod-48
+  NEXT POD list (path definition by segments / 3D distance / literature; REMIND TAL about the amodal-pixel fix before any occluded `--feature_geodesic` run).
+- **On a new GPU pod:** `source /workspace/activate_bsb.sh` still works (it sources `/workspace/disc/env/activate.sh`); `cd /workspace/disc && git pull` first.
 - **Research paused** on the feature-geodesic thread (pod 48 NEXT POD list still stands).
 - **Disk freed ~69 GB** (Tal ran the delete himself; the auto-mode classifier blocked `rm -rf` this pod even with Tal's OK):
   324 intermediate `encoder_checkpoint_step*.pth` (KEPT: every final `encoder_checkpoint.pth`, every `*_stageA_end.pth`, and
