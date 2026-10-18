@@ -88,6 +88,10 @@ Goal (long-term): dense correspondence between an image and a 3D object.
   `/workspace/activate_bsb.sh` (and `activate_disc.sh`) now only source it. All 375 shell scripts use `$DISC_ROOT` / `$DISC_WS` instead of `/workspace/...`.
 - **kaolin is optional** (commit 7be2fa1): lazy import; OBJ files load without it (identical vertices/faces on all 101 repo meshes). Only rendering needs it
   (= GPU machine). Mac env = `env/requirements_disc_mac.txt` (same versions, CPU torch, no kaolin). Env files for all 3 envs in `env/`.
+- **MAC SET UP (Tal's Claude Code on the Mac):** `~/Projects/disc` (DISC_WS=~/Projects), miniconda `~/miniconda3`, env `disc` python 3.9.23,
+  torch 1.12.1 CPU / numpy 1.26.4 / open3d 0.17.0, module imports OK. Mac-only deviations (Tal chose same versions or nothing): NO pymeshlab
+  (no py3.9 arm64 wheel -> remeshing stays on the pod); open3d needs `llvm-openmp` from conda-forge + DYLD_FALLBACK_LIBRARY_PATH (steps in the
+  header of `env/requirements_disc_mac.txt`). No data on the Mac yet.
 - **Run:ai status (from Tal's Claude Desktop session):** Docker Hub user `tberger3`, test image `tberger3/disc:v1` (built `--platform linux/amd64`);
   runai-cli 2.26.51, SSO login OK; project `avidan`, cluster hpc-220711; PVC `tal-disc-data` (lustre-user, RWO, 100G, at /workspace);
   workspace `tberger3-dev` (0 GPU) Running. **Blocked on the TAU VPN** (cluster API reachable only from TAU network).

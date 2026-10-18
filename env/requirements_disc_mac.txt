@@ -1,6 +1,11 @@
 # DISC Mac env (Apple Silicon, CPU only). Python 3.9. Derived from requirements_disc_gpu.txt:
 # CPU torch wheels, no kaolin (no macOS build; kaolin-dependent rendering runs on a GPU machine).
-# Install: conda create -n disc python=3.9 -y && conda activate disc && pip install -r env/requirements_disc_mac.txt
+# Install (verified on MacBook Air M5, 2026-10-18):
+#   conda create -n disc python=3.9 -c conda-forge --override-channels -y && conda activate disc
+#   pip install -r env/requirements_disc_mac.txt        # pymeshlab fails: no cp39 macOS arm64 wheel -> skip it
+#   conda install -c conda-forge llvm-openmp -y          # open3d 0.17 needs libomp (normally from Homebrew)
+#   conda env config vars set DYLD_FALLBACK_LIBRARY_PATH=$CONDA_PREFIX/lib:/usr/local/lib:/usr/lib   # then re-activate
+# Without pymeshlab, scripts/remesh_guitar_isotropic.py runs on the pod only. `pip check` warning about torch 1.12.1 is harmless.
 addict==2.4.0
 annotated-doc==0.0.5
 annotated-types==0.7.0
