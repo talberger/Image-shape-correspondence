@@ -1,5 +1,10 @@
 # Image–Shape Correspondence — project notes (read this first, every new pod)
 
+**SINGLE SOURCE (since 2026-10-18): this file lives in the repo at `bsb/workspace_meta/PROJECT_NOTES.md`.**
+On the pod, `/workspace/PROJECT_NOTES.md` is only a symlink to it. On the Mac / Run:ai there is no other copy.
+Rule: `git pull` before working on any machine, `commit + push` at the end (notes included). Push from a pod needs
+`source /workspace/activate_bsb.sh` first (it installs the deploy key the repo's `core.sshCommand` uses).
+
 Tal switches RunPod pods roughly daily; pods are ephemeral (`/root`, OS
 packages, GPU drivers/hub caches — all lost on switch). `/workspace` is a
 persistent network volume and is the only thing that survives. **This one
@@ -63,6 +68,71 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
+
+## 2026-10-18 (forty-ninth pod, CPU only) — CLEANUP + START OF THE MULTI-MACHINE SETUP. **NOTHING RAN.**
+- **Research paused** on the feature-geodesic thread (pod 48 NEXT POD list still stands).
+- **Disk freed ~69 GB** (Tal ran the delete himself; the auto-mode classifier blocked `rm -rf` this pod even with Tal's OK):
+  324 intermediate `encoder_checkpoint_step*.pth` (KEPT: every final `encoder_checkpoint.pth`, every `*_stageA_end.pth`, and
+  `encoder_checkpoint_step150.pth` = end of stage 1 in every run with `mu_switch_step=150` -- Tal: stage-1 weights must stay),
+  the 4 pod-47 `runs_debug_..._featgeo_*` dirs, `/workspace/.cache/pip`. List: `/workspace/logs/cleanup_2026-10-18_to_delete.txt`.
+  NOT deleted (Tal undecided): `runs_pod42_batch` 17 GB, the rest of `runs_debug_merge0.015_amodal_fillseg_sam3mask` ~29 GB, old `experiments/guitar` runs.
+- **Git:** pods 38-48 committed + pushed, `analysis` 6e98aa9.
+- **New way of working (Tal):** Mac (MacBook Air M5, 24 GB, CPU only = like a CPU pod) for daily work; GPU on a RunPod pod or on
+  TAU's Run:ai cluster. Plan: (1) git = single source of code [done]; (2) portable env spec -> Mac CPU env + Docker image for Run:ai;
+  (3) notes in the repo [done, see top of file]; (4) data/results stay on the server, rsync to the Mac only what is needed.
+- **Run:ai status (from Tal's Claude Desktop session):** Docker Hub user `tberger3`, test image `tberger3/disc:v1` (built `--platform linux/amd64`);
+  runai-cli 2.26.51, SSO login OK; project `avidan`, cluster hpc-220711; PVC `tal-disc-data` (lustre-user, RWO, 100G, at /workspace);
+  workspace `tberger3-dev` (0 GPU) Running. **Blocked on the TAU VPN** (cluster API reachable only from TAU network).
+
+## STATE AT POD CLOSE — 2026-10-14 (forty-eighth pod, CPU only, NO GPU). **NOTHING IS RUNNING, NOTHING WAS TRAINED.** Tal closes the pod.
+**Thread: FEATURE-AWARE 2D GEODESIC, calibration sweep on DINO+SD with neighbours in ANY segment (horse 56069). RESULT: no sweet spot found; Tal parks the per-step cost and looks for a different path definition.**
+- **Tal's framing (corrects pod 47):** the new metric SHOULD inflate paths inside a segment, but only SLIGHTLY compared with paths that leave the segment. The test is the ratio
+  "same segment / other segment", not "does in-segment inflate".
+- **Tool change:** `analysis/plot_2d_paths_in_segment.py --any_segment` -- the 8 neighbours (60 px, 8 directions) may lie in any fine segment; circle = same segment,
+  square = other segment; titles + stdout print mean length/original for same vs other (pre-edit copy `/workspace/archive/plot_2d_paths_in_segment.py.bak_2026-10-14`).
+  Centres (row, col) of pod 47: (270,150) nose, (110,140) forehead, (260,225) right body, (330,40) left chest, (190,130) between the eyes; last column = C (270,150) with
+  N1 (250,230) / N2 (70,140) / N3 (330,30). Features `demo/shic/crowding/horse_lvis56069/features/lvis56069_pix_sdsquare_fuse16.pth`, inputs from
+  `data/densepose_lvis/runs_debug_merge0.015_amodal_fillseg_sam3mask/lvis56069/`. ~30 s per figure on CPU.
+- **CAVEAT for reading "segment":** after merge 1.5% segment 1 = head + left chest + left body (the border runs down the face). C -> N3 (nose -> chest) counts as SAME segment.
+- **RESULTS (mean new/original path length, same segment / other segment; "-" = no other-segment neighbour):**
+  | power, beta | nose | forehead | right body | left chest | between eyes | C->N1/N2/N3 |
+  |---|---|---|---|---|---|---|
+  | p4 b0.5 | 1.09 / 1.27 | 1.15 | 1.15 / 1.40 | 1.29 | 1.17 / 1.00 | 1.2 / 1.0 / 1.3 |
+  | p4 b1 | 1.13 / 1.34 | 1.20 | 1.22 / 1.52 | 1.43 | 1.23 / 1.00 | 1.2 / 1.0 / 1.6 |
+  | p4 b2 | 1.15 / 1.43 | 1.24 | 1.25 / 1.59 | 1.57 | 1.41 / 1.05 | 1.3 / 1.0 / 1.7 |
+  | p4 b3 | 1.27 / 1.47 | 1.26 | 1.37 / 1.62 | 1.79 | 1.41 / 1.15 | 1.3 / 1.0 / 1.9 |
+  | p4 b10 | 1.32 / 1.63 | 1.29 | 1.53 / 2.88 | 2.30 | 1.60 / 2.50 | 3.0 / 1.0 / 2.2 |
+  | p4 b50 / b100 | 1.41 / 2.58 ; 1.43 / 2.62 | 1.44 ; 1.45 | 2.62 / 3.97 ; 2.71 / 4.05 | 2.53 ; 2.57 | 2.45 / 3.20 ; 2.51 / 3.20 | 3.2 / 1.2 / 2.4 |
+  | p6 b10 | 1.32 / 2.53 | 1.32 | 1.54 / 3.81 | 2.47 | 1.74 / 2.50 | 3.0 / 1.0 / 2.3 |
+  | p6 b50 / b100 | 1.37 / 3.65 ; 1.43 / 3.71 | 1.54 ; 1.62 | 2.54 / 4.13 ; 2.66 / 4.16 | 2.83 ; 2.88 | 3.12 / 3.30 ; 3.20 / 3.33 | 3.3/1.2/2.4 ; 3.3/1.2/4.1 |
+  | p8 b0 | 1.00 everywhere (= original metric, sanity check passed) | | | | | |
+  | p8 b0.5 | 1.10 / 1.34 | 1.18 | 1.23 / 1.52 | 1.58 (max 3.4) | 1.37 / 1.00 | 1.2 / 1.0 / 1.4 |
+  | p8 b1 | 1.16 / 1.51 | 1.21 | 1.30 / 1.68 | 1.73 | 1.41 / 1.30 | 1.4 / 1.0 / 1.8 |
+  | p8 b2 | 1.24 / 1.63 | 1.25 | 1.43 / 1.70 | 2.00 | 1.43 / 1.46 | 1.5 / 1.0 / 1.9 |
+  | p8 b3 | 1.26 / 1.67 | 1.26 | 1.46 / 1.76 | 2.12 | 1.44 / 1.62 | 1.5 / 1.0 / 2.0 |
+  | p8 b5 | 1.27 / 1.67 | 1.28 | 1.48 / 1.80 | 2.27 | 1.56 / 2.41 | 1.5 / 1.0 / 2.2 |
+  | p8 b10 | 1.30 / 2.44 | 1.31 | 2.16 / 3.81 | 2.64 | 1.72 / 2.50 | 3.0 / 1.0 / 2.3 |
+  | p8 b50 | 1.36 / 3.64 | 1.72 | 2.39 / 4.13 | 3.29 | 2.94 / 2.60 | 3.2 / 1.2 / 3.7 |
+  | p8 b100 | 1.38 / 3.71 | 2.04 | 2.50 / 4.19 | 3.33 (max 10) | 3.12 / 2.97 | 3.2 / 1.2 / 4.1 |
+- **Reading:** every setting that strengthens the separation somewhere also inflates in-segment paths somewhere else. Low beta (p4 b0.5-2) ~ the original metric
+  (safe, but C->N1 nose->body only x1.2). Biggest separation jump p8 b5 -> b10 (nose other 1.67 -> 2.44, C->N1 1.5 -> 3.0). Above b10 separation barely grows,
+  in-segment inflation does. The left chest (330,40), near the mask border, inflates at EVERY setting (vertical corridors). Power 8 creates corridors already at
+  b0.5 (chest 1.58, between eyes 1.37) where power 4 does not (1.29 / 1.17). Power changes little versus the left-right vs up-down step asymmetry (x1.7, pod 47).
+- **Literature search (Tal asked, web):** NO paper found that computes pixel-to-pixel paths on a DINO/SD feature map. Closest: GeoS (Criminisi 2008) and Geodesic
+  Matting (Bai & Sapiro 2007) = the same mechanism (Dijkstra / fast marching, step cost `sqrt(1 + g^2 |grad I|^2)`, colour gradient, mild = ~power 1-2) for
+  segmentation from seeds; Intelligent Scissors / minimal paths = explicit path but cost LOW on edges (follows the boundary = the opposite of ours).
+  Family 2 (affinity graph, average over ALL paths: Random Walker, NCuts, Deep Spectral Methods on DINO, diffusion / biharmonic / heat) gives a distance, NO path,
+  but is robust to single cheap corridors and isolated walls -- the two failure modes seen. Pod 45: biharmonic was the only method with a head/body boundary.
+  Tal: the 2D papers "are not what we were looking for" (they are not a path between two pixels on a feature map) -- correct; recorded as building blocks only.
+- **NEXT POD (Tal, nothing decided):** find a different path definition: (a) by segments, (b) move the distance to 3D, (c) keep searching the literature.
+  Family-2 distance on DINO+SD with the same same/other check is cheap (CPU, minutes) if Tal wants it. Still open: hidden (amodal) pixels fix before any occluded
+  instance with `--feature_geodesic` (REMIND TAL); the wider-span (14-28 px) idea is on hold; 3D geodesics for the three pairs; bear 159218.
+- **Also this pod:** Obsidian note for the experiment (Tal's vault, written here then copied by Tal): `/workspace/obsidian/2026-10-13_2D_distance_path/`
+  (`.md` + `attachments/`, zip next to it); today's section is appended to the same note. Recap of `rkd_feat_angle2` (closed 09-04 / 09-15) given to Tal for a new branch.
+- **Figures** (`demo/shic/crowding/horse_lvis56069/`): `lvis56069_pod48_paths_any_segment_{beta100_power8, beta5_10_power8, beta10_50_100_power8,
+  beta10_50_100_power6, beta0_5_power8, beta3_5_power8, beta3_10_50_100_power4, beta1_2_3_power4, beta0.5_1_power4, beta0.5_1_2_3_5_power8}.png`.
+- Uncommitted in bsb: + the `--any_segment` change above (pods 38-48 all uncommitted). Disk: the 5 pod-47 run dirs (~10 GB) still waiting for Tal's OK to delete.
+  Backups of this file: `/workspace/archive/PROJECT_NOTES_backup_2026-10-14_pod48_{open,close}.md`.
 
 ## STATE AT POD CLOSE — 2026-10-13 (forty-seventh pod, 1x RTX 2000 Ada sm_89 16 GB, same day as pod 46). **NOTHING IS RUNNING.** Tal closes the pod.
 **Thread: FEATURE-AWARE 2D GEODESIC, now on the training's DINO+SD features and in real runs (horse 56069). RESULT: implemented and run; it does NOT fix the nose.**
