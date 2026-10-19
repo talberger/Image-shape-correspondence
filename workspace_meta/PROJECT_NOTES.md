@@ -69,6 +69,49 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
+## 2026-10-19 (MAC session, CPU only) — XSEG EXPERIMENT PLANNED + IMPLEMENTED, **NOT RUN YET. NEXT = RUN IT ON A GPU POD.**
+**Other news:** Tal's TAU VPN works (Run:ai reachable); Docker / Run:ai setup continues AFTER this experiment. Tal's Obsidian vault is on the
+Mac at `~/Documents/DISC` (the Mac's Claude writes it directly); meeting with Itai 2026-10-18 recorded there (`Meetings/2026-10-18 Itai.md`):
+RunPod guide screenshots; revisit feature RKD (Itai: "the features are unstable"); bilateral-style split, no hard threshold.
+- **Problem (Tal):** for CROSS-SEGMENT pairs the 2D geodesic is an inaccurate teacher where parts are crowded in the photo -- horse 56069:
+  nose -> belly is short in the image, long on the mesh. The nose (GT pt 3, ZS 0.0) collapses in STAGE 1 (95.1), the only stage that has
+  cross-segment pairs (stage 1 = global ellipse, 8 in + 8 out; stage 2 = segment ellipses, 16 in + 0 out).
+- **The fix tried (Tal's design, agreed point by point):** ONE stage, 300 steps, no stage 2, 8 in + 8 out neighbours per centre.
+  In-segment pair -> `rkd_spatial_dist` (the ORIGINAL 2D geodesic, no feature-geodesic metric), with ITS SEGMENT's ellipse.
+  Cross-segment pair -> feature RKD INSTEAD (no spatial term, no mu -- so no global ellipse anywhere). HARD split by segment for now:
+  the soft bilateral weight (`alpha_ij = exp(-(1-cos(f_i,f_j))/sigma)`) was proposed and PARKED by Tal ("too complicated for now").
+  Both terms calibrated to equal gradient norms first (Tal: "similar proportion").
+- **Feature term, three arms** (teacher always `cos(f_i, f_j)` of the FROZEN photo features; student `s_i = sum_a w_ia V[v_a]`):
+  | arm (`--xseg_feat_mode`) | student | gradient path | why |
+  |---|---|---|---|
+  | `table` (main) | `<s_i, s_j>` with V = FROZEN phase-1 vertex features (unit) = `sum_a sum_b w_ia w_jb C[v_a,v_b]` | match `w` only | no circularity: a fixed table, exactly like D3D in rkd_spatial_dist |
+  | `wonly` | `cos(s_i, s_j)`, V = live F detached | match `w` only | as `table` but the values drift (= the old "gradW") |
+  | `Fonly` | `cos(s_i, s_j)`, V = live F, w detached | F only | the circular path alone (= the old "gradF") |
+  No `xseg_spatial` control (cross pairs on spatial + global mu): Tal declined it -- "we already know spatial + global is the problem".
+- **EXP 0 first (Tal):** per-segment only (`--mu_scope segment_aniso`, 16 in + 0 out, no stage 1) on the current recipe -- does the nose still
+  collapse without any cross-segment pair? Never run on this horse with the current recipe (only on the guitar: per-seg-only beat
+  two-stage by ~3). Known: no cross pairs -> left/right is NOT tested by exp 0 (horse 56069 has little left/right confusion); exp 1 tests it.
+- **CODE (Mac, 2026-10-19; CPU unit test only, the training loop has NOT run yet):**
+  `modules/feature_rkd_loss.py::xseg_feat_loss` (tested: `table` == the explicit `sum w w C`; gradient reaches F only via w for
+  table / wonly, only directly for Fonly). `phase2/train_relational_loss.py`: `--xseg_feat_mode {off,table,wonly,Fonly}`,
+  `--xseg_feat_weight`, `--xseg_feat_balance [--xseg_feat_balance_step 25]` (grad norms of all three modes vs the in-seg spatial term,
+  prints `XSEG_WEIGHT mode=.. weight_equal=..`, stops). The split is by POSITION on the neighbour axis (cat([in, out])); step 1 prints
+  `XSEG check` = in-slice same-segment fraction (must be 1) and cross-slice (must be 0). `off` (default) = bit-identical to before.
+  Needs `--mu_mode learned --mu_scope segment_aniso` (the segment_aniso out>0 guard is relaxed only under xseg).
+- **RUN (GPU pod):** `git pull && source env/activate.sh`, then `ARM=all bash scripts/run_xseg_horse.sh` (detached + watcher, per the rules
+  below) = perseg -> balance -> table / wonly / Fonly at the equal-grad weights (`RATIO=3` = 1/3). Single arms: `ARM=perseg|balance`,
+  `ARM=table WEIGHT=<w>`. Inputs = the 10-13 two-stage run's dir `data/densepose_lvis/runs_debug_merge0.015_amodal_fillseg_sam3mask/lvis56069`
+  (SAM 3 mask, merge 1.5%, fillseg, no amodal: mask in one piece); same recipe otherwise (LoRA-W all r4 lr 1e-3 read at alpha 0.5, cycle v2
+  c=1.676e-5 T_cyc=0.05 stride 3, T=0.01, mu lr 5e-2; NOTE the LVIS recipe has NO anchor and NO L_dist). Out: `data/densepose_lvis/runs_xseg/lvis56069/<arm>/`,
+  `demo/shic/xseg/horse_lvis56069/<arm>/` (eval_arms.json with zs / twostage / arm, soft-snap back-projection), logs `$DISC_WS/logs/xseg/`.
+  **First run = smoke test:** check the `XSEG check` line and that balance prints three `XSEG_WEIGHT` lines before trusting the queue.
+- **Baseline to beat** (that run's `eval_arms.json`, soft-snap per point pt1 / pt2 / pt3 = nose, mean): ZS 6.3 / 24.6 / 0.0 (10.3);
+  two-stage end of stage 1 9.4 / 15.3 / 95.1 (39.9); two-stage final 7.4 / 15.3 / 95.1 (39.3). 3 GT points, 1 instance, 1 seed.
+- **Read the results on:** nose (pt 3) soft-snap vs ZS 0.0 / two-stage 95.1; the back-projection (left/right on the legs);
+  `|gap|` and teacher/student in the step log (did the feature term actually move?). Then Tal decides.
+- **Open:** the bilateral soft weight (parked); bear 159218 as the second example; the amodal-pixel fix stays required before any occluded
+  `--feature_geodesic` run (REMIND TAL) -- not relevant to xseg, which uses the original 2D geodesic.
+
 ## STATE AT POD CLOSE — 2026-10-18 (forty-ninth pod, CPU only) — CLEANUP + MULTI-MACHINE SETUP. **NOTHING IS RUNNING, NOTHING WAS TRAINED.** Tal closes the pod.
 **NEXT SESSION = ON THE MAC (Tal, 10-18):** `cd ~/Projects/disc && git pull && source env/activate.sh`, then read this file.
 - **Open, in order:** (1) Tal finishes the TAU VPN (in progress) -> `runai workspace bash tberger3-dev` check (python, `df -h /workspace`, write test);

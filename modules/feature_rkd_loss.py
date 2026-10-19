@@ -265,6 +265,66 @@ def measure_feature_mu_references(img_center, img_neighbors, msh_center, msh_nei
                 reduce(_pair_distances(msh_center, msh_neighbors, eps)))
 
 
+XSEG_FEAT_MODES = ('table', 'wonly', 'Fonly')
+
+
+def xseg_feat_loss(img_center, img_neighbors, center_topk_idx, center_weights,
+                   neighbor_topk_idx, neighbor_weights, vertex_features, frozen_vertex_unit,
+                   mode, huber_delta=1.0, eps=1e-12):
+    """Feature-RKD for CROSS-SEGMENT pairs only (--xseg_feat_mode, Tal 2026-10-19).
+
+    Why: across two segments the 2D geodesic is the wrong teacher when parts touch in the image
+    (horse 56069: nose and belly are close in the photo, far on the mesh). Those pairs get this
+    term INSTEAD of rkd_spatial_dist; in-segment pairs keep rkd_spatial_dist (the caller splits them).
+
+    teacher  t_ij = cos(f_i, f_j)   frozen photo features (DINO+SD), no gradient
+    student, by mode -- s_i = sum_a w_ia V[v_a], with V and w as below:
+      'table'  V = frozen_vertex_unit (the phase-1 features, unit norm, CONSTANT), w live.
+               student = <s_i, s_j> = sum_a sum_b w_ia w_jb C[v_a, v_b], C = cos of the frozen vertex
+               features -- a fixed table exactly like D3D in rkd_spatial_dist, so the gradient reaches
+               the encoder ONLY through the match w. The VxV table is never built: the double sum is
+               bilinear, so it equals the dot product of the two weighted means.
+      'wonly'  V = vertex_features.detach() (the LIVE features, detached), w live; student = cos(s_i, s_j).
+               Same gradient path as 'table' (w only), but the values drift with training.
+      'Fonly'  V = vertex_features (live), w DETACHED; student = cos(s_i, s_j). The gradient reaches the
+               encoder only by reshaping F under a fixed match -- the circular path on its own.
+
+        img_center         [n, D]        photo feature at each centre
+        img_neighbors      [n, k, D]     photo feature at each CROSS-segment neighbour
+        center_topk_idx    long [n, K]   centre's top-K vertices; center_weights [n, K] their softmax
+        neighbor_topk_idx  long [n, k, K]; neighbor_weights [n, k, K]
+        vertex_features    [V, D]        live encoder output
+        frozen_vertex_unit [V, D] or None  needed for 'table' only
+    Returns (loss, mean |student - teacher|, mean teacher, mean student) -- the last three are floats.
+    """
+    if mode not in XSEG_FEAT_MODES:
+        raise ValueError('xseg_feat_loss: mode must be one of %s, got %r' % (XSEG_FEAT_MODES, mode))
+    n, k = neighbor_topk_idx.shape[:2]
+    K = center_topk_idx.shape[1]
+    with torch.no_grad():
+        teacher = F.cosine_similarity(img_center.float().unsqueeze(1), img_neighbors.float(),
+                                      dim=-1, eps=eps)                              # [n, k]
+    idx = torch.cat([center_topk_idx, neighbor_topk_idx.reshape(n * k, K)], dim=0)
+    w = torch.cat([center_weights, neighbor_weights.reshape(n * k, K)], dim=0)
+    if mode == 'table':
+        if frozen_vertex_unit is None:
+            raise ValueError("xseg_feat_loss: mode 'table' needs frozen_vertex_unit")
+        s = soft_feature(frozen_vertex_unit, idx, w)
+    elif mode == 'wonly':
+        s = soft_feature(vertex_features.detach(), idx, w)
+    else:
+        s = soft_feature(vertex_features, idx, w.detach())
+    s_c, s_n = s[:n], s[n:].view(n, k, -1)
+    if mode == 'table':
+        student = (s_c.unsqueeze(1) * s_n).sum(-1)                                  # [n, k]
+    else:
+        student = F.cosine_similarity(s_c.unsqueeze(1), s_n, dim=-1, eps=eps)
+    loss = F.huber_loss(student, teacher.to(student.dtype), delta=huber_delta, reduction='mean')
+    with torch.no_grad():
+        return (loss, float((student - teacher).abs().mean()),
+                float(teacher.mean()), float(student.mean()))
+
+
 # CANONICAL NAMES (Tal, 2026-09-15): rkd_feat_dist / rkd_feat_angle2 / rkd_feat_angle3. The old names stay
 # importable so older code and archived notes still resolve.
 feature_rkd_distance_loss = rkd_feat_dist_loss

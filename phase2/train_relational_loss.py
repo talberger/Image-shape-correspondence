@@ -66,7 +66,8 @@ from modules.mapping_loss import (feature_drift, sample_center_pixels,
                                   sample_grid_center_pixels, soft_map_to_vertices)
 from modules.feature_rkd_loss import (rkd_feat_angle3_loss, rkd_feat_dist_loss,
                                       rkd_feat_angle2_loss, hard_feature,
-                                      measure_feature_mu_references, soft_feature)
+                                      measure_feature_mu_references, soft_feature,
+                                      xseg_feat_loss, XSEG_FEAT_MODES)
 from modules.relational_loss import (build_segment_index, relational_loss, rkd_spatial_dist_loss,
                                      sample_in_segment_neighbors, sample_out_segment_neighbors,
                                      rkd_spatial_angle3_loss)
@@ -852,6 +853,17 @@ def train(args):
             print('  *** rkd_spatial_dist_weight=0: the SPATIAL term is OFF -- nothing anchors the map '
                   'to geometry (2026-09-04: this diverged when tried) ***')
 
+    xseg_on = args.xseg_feat_mode != 'off'
+    frozen_vertex_unit = None
+    if xseg_on:
+        # 'table' student: the phase-1 vertex features, unit norm, frozen for the whole run (C = their cosines)
+        frozen_vertex_unit = F.normalize(phase1_features.detach().float(), dim=-1)
+        print('  XSEG: %d in-segment pairs per centre -> rkd_spatial_dist (segment ellipse); %d cross-segment pairs '
+              '-> feature RKD, mode %s, weight %g%s'
+              % (args.num_neighbors_in_segment, args.num_neighbors_out_segment, args.xseg_feat_mode,
+                 args.xseg_feat_weight, '  [BALANCE diagnostic at step %d]' % args.xseg_feat_balance_step
+                 if args.xseg_feat_balance else ''))
+
     print('  distance_weight: %s' % (args.distance_weight or 'none (every pair weighted equally)'))
     if args.anchor_weight > 0.0 or args.anchor_balance_from:
         print('  ZS anchor: weight=%g T=%g target=%s (CE over all %d vertices vs frozen phase-1, '
@@ -892,7 +904,9 @@ def train(args):
             if args.mu_mode != 'learned':
                 raise SystemExit('--mu_scope %s is implemented for --mu_mode learned only' % args.mu_scope)
             # global_aniso: ONE ellipse, so an out-of-segment pair has no ambiguity -- allowed (Tal, 2026-09-27)
-            if args.num_neighbors_out_segment > 0 and args.mu_scope not in ('global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso', 'dual_global_local_aniso'):
+            # --xseg_feat_mode: the out-of-segment pairs never reach rkd_spatial_dist, so they need no ellipse
+            if (args.num_neighbors_out_segment > 0 and args.xseg_feat_mode == 'off'
+                    and args.mu_scope not in ('global_aniso', 'segment_aniso_xglobal', 'global_then_segment_aniso', 'dual_global_local_aniso')):
                 raise SystemExit('--mu_scope segment_aniso: out-of-segment pairs have no single segment '
                                  'ellipse (the isotropic path uses a geometric mean) -- not defined yet; '
                                  'use --num_neighbors_out_segment 0')
@@ -1145,34 +1159,51 @@ def train(args):
             neighbor_weights = weights[num_centers:].view(
                 num_centers, num_neighbors, args.k_vertices_per_pixel)
 
+            # --xseg_feat_mode: only the IN-segment prefix of the neighbour axis enters the spatial term
+            # (the axis is cat([in, out]); the cross-segment rest goes to xseg_feat_loss below).
+            # Off: the full tensors, untouched, so every earlier run is bit-identical.
+            if xseg_on:
+                _nin = args.num_neighbors_in_segment
+                sp_coords = neighbor_coords[:, :_nin]
+                sp_topk_idx, sp_weights = neighbor_topk_idx[:, :_nin], neighbor_weights[:, :_nin]
+            else:
+                sp_coords, sp_topk_idx, sp_weights = neighbor_coords, neighbor_topk_idx, neighbor_weights
+            if xseg_on and step == 1:
+                # the split is by POSITION on the neighbour axis -- check it against the actual segments once
+                _seg = torch.as_tensor(fine_segments).long()
+                _cs = segment_ids.long().unsqueeze(1)
+                _same = _seg[neighbor_coords[..., 0], neighbor_coords[..., 1]] == _cs
+                print('  XSEG check, step 1: same segment as the centre -- in-segment slice %.4f (must be 1), '
+                      'cross-segment slice %.4f (must be 0)'
+                      % (_same[:, :_nin].float().mean().item(), _same[:, _nin:].float().mean().item()))
             _rl = rkd_spatial_dist_loss(
-                center_topk_idx, center_weights, neighbor_topk_idx, neighbor_weights,
-                neighbor_coords, geo_table_3d, geo_table_2d_center_rows, pixel_to_node,
+                center_topk_idx, center_weights, sp_topk_idx, sp_weights,
+                sp_coords, geo_table_3d, geo_table_2d_center_rows, pixel_to_node,
                 mu_3D_reference=mu_3D_reference, mu_2D_reference=mu_2D_reference,
                 mu_3d_scale=(args.mu_3d_scale if args.mu_mode == 'fixed' else
                              'optimal' if args.mu_mode == 'optimal' else
                              aniso_scale_from_params(grid_center_params(mu_aniso, coords, mu_grid_bbox,
-                                                                        args.mu_grid), coords, neighbor_coords)
+                                                                        args.mu_grid), coords, sp_coords)
                              if args.mu_scope == 'grid_aniso' else
-                             hybrid_aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups,
-                                                   mu_seg_map[neighbor_coords[..., 0].to(device),
-                                                              neighbor_coords[..., 1].to(device)])
+                             hybrid_aniso_mu_scale(mu_aniso, coords, sp_coords, mu_groups,
+                                                   mu_seg_map[sp_coords[..., 0].to(device),
+                                                              sp_coords[..., 1].to(device)])
                              if args.mu_scope == 'segment_aniso_xglobal' else
-                             hybrid_aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups,
-                                                   mu_seg_map[neighbor_coords[..., 0].to(device),
-                                                              neighbor_coords[..., 1].to(device)])
+                             hybrid_aniso_mu_scale(mu_aniso, coords, sp_coords, mu_groups,
+                                                   mu_seg_map[sp_coords[..., 0].to(device),
+                                                              sp_coords[..., 1].to(device)])
                              if args.mu_scope == 'global_then_segment_aniso' and args.switch_hybrid and not switch_global else
-                             dual_aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups,
+                             dual_aniso_mu_scale(mu_aniso, coords, sp_coords, mu_groups,
                                                  args.num_neighbors_in_segment + args.num_neighbors_out_segment)
                              if args.mu_scope == 'dual_global_local_aniso' else
-                             switch_aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups, switch_global)
+                             switch_aniso_mu_scale(mu_aniso, coords, sp_coords, mu_groups, switch_global)
                              if args.mu_scope == 'global_then_segment_aniso' else
-                             aniso_mu_scale(mu_aniso, coords, neighbor_coords, mu_groups)
+                             aniso_mu_scale(mu_aniso, coords, sp_coords, mu_groups)
                              if mu_aniso is not None else mu_log_scale.exp()),
                 mu_groups=mu_groups, mu_n_groups=mu_n_groups,
                 mu_neighbor_groups=(None if mu_seg_map is None else
-                                    mu_seg_map[neighbor_coords[..., 0].to(device),
-                                               neighbor_coords[..., 1].to(device)]),
+                                    mu_seg_map[sp_coords[..., 0].to(device),
+                                               sp_coords[..., 1].to(device)]),
                 mu_fit_space=args.mu_fit_space,
                 return_mu_scale=(args.mu_mode != 'fixed'),
                 huber_delta=args.huber_delta,
@@ -1223,6 +1254,43 @@ def train(args):
 
         loss = args.rkd_spatial_dist_weight * loss
         sdist_loss = loss  # the weighted rkd_spatial_dist term alone -- reference for --rkd_feat_angle2_balance
+
+        # --- XSEG cross-segment feature term (Tal, 2026-10-19) ----------------------------------------------
+        # The cross-segment suffix of the neighbour axis, which rkd_spatial_dist no longer sees. 'off' skips
+        # the block, so every earlier run is bit-identical (no RNG is consumed here either way).
+        xseg_raw = xseg_gap = xseg_teacher = xseg_student = float('nan')
+        if xseg_on:
+            _nin = args.num_neighbors_in_segment
+            _xargs = (pixel_features[:num_centers],
+                      pixel_features[num_centers:].view(num_centers, num_neighbors, -1)[:, _nin:],
+                      center_topk_idx, center_weights, neighbor_topk_idx[:, _nin:], neighbor_weights[:, _nin:],
+                      vertex_features, frozen_vertex_unit)
+            if args.xseg_feat_balance and step == args.xseg_feat_balance_step:
+                # Same rule as every other term: under Adam only the RATIO of gradient norms matters.
+                params = [p for p in encoder.parameters() if p.requires_grad]
+                def _gnx(t):
+                    gs = torch.autograd.grad(t, params, retain_graph=True, allow_unused=True)
+                    return torch.sqrt(sum((g.float() ** 2).sum() for g in gs if g is not None)).item()
+                g_sd = _gnx(sdist_loss)
+                print('--- xseg_feat balance at step %d (%d in-segment pairs -> spatial, %d cross-segment -> feature)'
+                      % (step, _nin, args.num_neighbors_out_segment))
+                print('    rkd_spatial_dist (in-seg) : loss %.6e  grad norm %.4e' % (sdist_loss.item(), g_sd))
+                for _m in XSEG_FEAT_MODES:
+                    _l, _gap, _t, _s = xseg_feat_loss(*_xargs, mode=_m, huber_delta=args.huber_delta)
+                    g_x = _gnx(_l)
+                    print('    xseg_feat %-6s          : loss %.6e  grad norm %.4e  |gap| %.4f  teacher %.4f  student %.4f'
+                          % (_m, _l.item(), g_x, _gap, _t, _s))
+                    for r in (1.0, 3.0, 10.0):
+                        print('        --xseg_feat_weight at 1/%g of rkd_spatial_dist: %.4e'
+                              % (r, g_sd / (r * max(g_x, 1e-30))))
+                    print('XSEG_WEIGHT mode=%s weight_equal=%.4e' % (_m, g_sd / max(g_x, 1e-30)))   # read by scripts/run_xseg_horse.sh
+                print('--- (--xseg_feat_balance: diagnostic only, stopping before backward)')
+                return
+            x_loss, xseg_gap, xseg_teacher, xseg_student = xseg_feat_loss(
+                *_xargs, mode=args.xseg_feat_mode, huber_delta=args.huber_delta)
+            xseg_raw = x_loss.item()
+            if args.xseg_feat_weight > 0.0:
+                loss = loss + args.xseg_feat_weight * x_loss
 
         # --- rkd_spatial_angle3 (added 2026-09-15 as ANGLE-SPATIAL) ------------------------------------------------
         # RKD's angle term in the SPATIAL domain, EUCLIDEAN angles (image-plane rays vs chords
@@ -1487,6 +1555,9 @@ def train(args):
                                % (ratio.max().item(), ratio.median().item()))
             sang_str = ('' if args.rkd_spatial_angle3_weight == 0.0 else
                         '  spatial_angle3=%.5f (raw) cos_gap=%.4f valid=%.3f' % (sang_raw, sang_gap, sang_valid))
+            if xseg_on:
+                sang_str += ('  xseg_%s=%.6f (raw) |gap|=%.4f teacher=%.4f student=%.4f'
+                             % (args.xseg_feat_mode, xseg_raw, xseg_gap, xseg_teacher, xseg_student))
             print('step %4d/%d  loss %.6f (mu_2D=%.3f mu_3D_live=%.5f, ref_2D=%s ref_3D=%s)%s%s%s%s%s%s%s  '
                   'drift(cos vs phase 1) %.4f'
                   % (step, args.num_iters, loss.item(), mu_2D, mu_3D_live,
@@ -1684,6 +1755,25 @@ if __name__ == '__main__':
                              'weights are 0, to read off their natural magnitudes before choosing '
                              'beta/gamma. Costs one extra soft_feature + two losses per step and '
                              'does NOT affect the optimized loss.')
+    # XSEG (Tal, 2026-10-19): split the pairs by kind. In-segment pairs (the first
+    # --num_neighbors_in_segment along the neighbour axis) get rkd_spatial_dist; cross-segment pairs
+    # (the rest) get xseg_feat_loss INSTEAD -- they leave the spatial term entirely. One stage, no switch.
+    parser.add_argument('--xseg_feat_mode', type=str, default='off', choices=('off',) + XSEG_FEAT_MODES,
+                        help="cross-segment pairs: 'off' (default) = every pair in rkd_spatial_dist, as every run "
+                             "before. 'table' = feature RKD against the FROZEN phase-1 vertex features (gradient "
+                             "through the match w only); 'wonly' = against the live features, F detached (w only); "
+                             "'Fonly' = live features, w detached (F only). See xseg_feat_loss() in "
+                             'modules/feature_rkd_loss.py. Needs --geodesic, --mu_scope segment_aniso and '
+                             '--num_neighbors_out_segment > 0.')
+    parser.add_argument('--xseg_feat_weight', type=float, default=0.0,
+                        help='weight of the cross-segment feature term (calibrate with --xseg_feat_balance)')
+    parser.add_argument('--xseg_feat_balance', action='store_true',
+                        help='diagnostic: at step --xseg_feat_balance_step print the gradient norms of the weighted '
+                             'in-segment rkd_spatial_dist and of the cross-segment feature term for ALL three modes, '
+                             'and the weight at equal / 1/3 / 1/10, then stop before backward. Steps before it train '
+                             'with --xseg_feat_weight (0 = in-segment spatial + cycle only).')
+    parser.add_argument('--xseg_feat_balance_step', type=int, default=25,
+                        help='step at which --xseg_feat_balance measures (default 25, as the earlier calibrations)')
     parser.add_argument('--temperature', type=float, default=1.0,
                          help='softmax temperature for soft_map_to_vertices (DPC Eq. 1-3). 1.0 = the '
                                'plain softmax every phase-2 run before 2026-08-25 trained with. NOTE: '
@@ -2026,6 +2116,23 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.mu_scope == 'dual_global_segment_aniso':   # old name (2026-10-01, renamed the same day; the first horse run's run_config has it)
         args.mu_scope = 'dual_global_local_aniso'
+
+    if args.xseg_feat_mode != 'off' or args.xseg_feat_balance:
+        # the split relies on the neighbour axis being cat([in, out]) and on ONE neighbour set for the whole
+        # run: no stage switch, no dual set, no fixed neighbours, no resampled centers
+        if args.xseg_feat_balance and args.xseg_feat_mode == 'off':
+            raise SystemExit('--xseg_feat_balance needs --xseg_feat_mode (any mode; all three are measured)')
+        if not args.geodesic:
+            raise SystemExit('--xseg_feat_mode is only wired into the --geodesic branch')
+        if args.mu_scope != 'segment_aniso' or args.mu_mode != 'learned':
+            raise SystemExit('--xseg_feat_mode needs --mu_mode learned --mu_scope segment_aniso (in-segment pairs use '
+                             'their segment ellipse; cross-segment pairs have no mu)')
+        if args.num_neighbors_out_segment <= 0 or args.num_neighbors_in_segment <= 0:
+            raise SystemExit('--xseg_feat_mode needs both --num_neighbors_in_segment and --num_neighbors_out_segment > 0')
+        if args.fixed_neighbors or args.resample_centers:
+            raise SystemExit('--xseg_feat_mode is not implemented with --fixed_neighbors / --resample_centers')
+        if args.feat_student_mode != 'soft' or args.feat_detach_weights or args.feat_detach_features:
+            raise SystemExit('--xseg_feat_mode sets its own student and detach; drop --feat_student_mode/--feat_detach_*')
 
     if args.mu_mode != 'fixed':
         if args.mu_3d_scale != 1.0:
