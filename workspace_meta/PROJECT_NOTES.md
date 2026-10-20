@@ -98,8 +98,7 @@ Goal (long-term): dense correspondence between an image and a 3D object.
     (SAM 1/2-style) or text. Proposed (not built, not decided): a point-grid wrapper on SAM 3 (generic, = what SAM 1 does today). Text prompts per part
     ("horse head") conflict with the stay-generic rule. Also cheap to check first: the map BEFORE the 1.5% merge.
 - **NEXT:** Tal reviews the 4 SUMMARY figures + decides; segmentation (SAM 3 grid wrapper?); bear 159218 as 2nd example; read `|gap|` in the logs.
-- **Obsidian:** this pod has no vault access; an Obsidian-ready note of this session is at `workspace_meta/obsidian_inbox/2026-10-20 XSEG results.md`
-  for the Mac's Claude to move into `~/Documents/DISC` (then delete from the inbox).
+- **Obsidian:** DONE (Mac, 2026-10-20): moved to `~/Documents/DISC/Experiments/2026-10-19 XSEG cross-segment feature RKD.md` (Hebrew, vault format), inbox emptied.
 - New working rule (images via `SendUserFile`) added to "How Tal wants the assistant to work".
 
 ## 2026-10-19 (MAC session, CPU only) — XSEG EXPERIMENT PLANNED + IMPLEMENTED. **RAN 2026-10-20, results in the entry above.**
