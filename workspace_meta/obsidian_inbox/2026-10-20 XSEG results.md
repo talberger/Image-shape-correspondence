@@ -32,4 +32,24 @@ tags: [experiment, xseg, horse56069]
 
 **Next:** review the figures, fix the segmentation (SAM 3?), bear 159218 as second example.
 
-Figures (pod): `demo/shic/xseg/horse_lvis56069/<arm>/summary/SUMMARY_lvis56069.png`
+## Figures
+
+Two-stage (baseline): mean 39.3, nose 95.1 (collapsed)
+![[xseg_twostage_baseline.png]]
+
+perseg (exp 0): mean 18.0, nose 10.1
+![[xseg_perseg.png]]
+
+table (exp 1, main): mean 12.6, nose 6.0
+![[xseg_table.png]]
+
+wonly: mean 23.1, nose 20.9
+![[xseg_wonly.png]]
+
+Fonly: mean 24.3, nose 20.6
+![[xseg_Fonly.png]]
+
+Training segmentation (4 segments; segment 1 joins the head with the front body)
+![[xseg_fine_segments.png]]
+
+(Images in `xseg_2026-10-20/`; move that folder into the vault together with this note.)
