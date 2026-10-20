@@ -3769,6 +3769,9 @@ git config --global --add safe.directory /workspace/bsb
 - **SHOWING IMAGES (Tal, 2026-10-20): send them with the `SendUserFile` tool (`display: "render"`), one call per image, with a
   caption saying what the image is** (arm / run, key numbers). Markdown `![](path)` and plain file links do NOT render for Tal
   (VS Code extension) -- he should never have to click a link to see a figure. When comparing, send new and old side by side.
+- **OBSIDIAN FROM A POD (Tal, 2026-10-20):** write the note to `workspace_meta/obsidian_inbox/` and COPY its figures next to it
+  (embedded `![[file.png]]`), then commit + push. Never only pod paths: the Mac cannot open them (`demo/`, `data/` are gitignored).
+  On the Mac, Claude moves the note + images into `~/Documents/DISC` and empties the inbox.
 - **Don't use opaque step labels** ("A1/A2/A3"). Name the script or describe
   the step in a few words.
 - **Don't hesitate on tool permission prompts** — Tal approves every one.
