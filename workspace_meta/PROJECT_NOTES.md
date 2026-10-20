@@ -69,7 +69,40 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
-## 2026-10-19 (MAC session, CPU only) — XSEG EXPERIMENT PLANNED + IMPLEMENTED, **NOT RUN YET. NEXT = RUN IT ON A GPU POD.**
+## STATE AT POD CLOSE — 2026-10-20 (fiftieth pod, RTX 2000 Ada) — XSEG RUN, ALL 4 ARMS DONE. **NOTHING IS RUNNING.** Tal reviews the results.
+- **Ran the 10-19 plan as written** (`a566d3b`). Smoke test (`ARM=balance`) passed: `XSEG check` in-slice 1.0000 / cross-slice 0.0000; three
+  `XSEG_WEIGHT` lines, table 1.0890e-01 / wonly 4.0686e-02 / Fonly 7.0602e-03 (re-run inside the queue: identical to the last digit = deterministic).
+  Then `ARM=all` detached, **RATIO=1** (= the equal-grad weights above; `RATIO=3` in the 10-19 entry is only an option, not used). ~35 min total.
+- **RESULTS** (soft-snap geodesic error, 228-normalized, lower = better; pt 3 = nose; 3 GT pts, 1 instance, 1 seed, cross-pod noise ~2):
+  | arm | pt1 | pt2 | pt3 nose | mean |
+  |---|---|---|---|---|
+  | ZS | 6.3 | 24.6 | 0.0 | 10.3 |
+  | two-stage (10-13 baseline) | 7.4 | 15.3 | 95.1 | 39.3 |
+  | perseg (exp 0) | 18.1 | 25.8 | 10.1 | 18.0 |
+  | **table** (exp 1, main) | **4.1** | 27.7 | **6.0** | **12.6** |
+  | wonly | 26.2 | 22.3 | 20.9 | 23.1 |
+  | Fonly | 28.6 | 23.5 | 20.6 | 24.3 |
+  | SHIC | 2.3 | 18.3 | 0.0 | 6.9 |
+  - Exp 0: no cross-segment pairs -> the nose no longer collapses (95.1 -> 10.1), but pt1/pt2 get worse (no constraint between parts).
+  - Exp 1: `table` keeps the nose AND recovers pt1 = best of our arms, still behind ZS (10.3) and SHIC on mean; pt2 is missed by every
+    method toward the shoulder (vertices ~2748). The two circular arms (wonly/Fonly) are worse than perseg. **Tal has not reviewed yet.**
+  - Not yet read: `|gap|` / teacher-student in the step logs (did the feature term move?).
+- **Figures** (v2 SUMMARY layout, SHIC half reused byte-identical from the old summary): `demo/shic/xseg/horse_lvis56069/<arm>/summary/SUMMARY_lvis56069.png`
+  for perseg/table/wonly/Fonly; old baseline `demo/shic/debug_twostage/horse_lvis56069_merge0.015_amodal_fillseg_sam3mask/summary/SUMMARY_lvis56069.png`.
+  Built with `ANN_ID=56069 CLASS=horse RUNS=data/densepose_lvis/runs_debug_merge0.015_amodal_fillseg_sam3mask PRED_F=<run>/alpha/alpha0.5/pred_f.pth
+  BASE=<demo>/<arm>/summary SHIC_BASE=<old summary dir> bash scripts/make_lvis_arm_summary.sh`. Runs `data/densepose_lvis/runs_xseg/lvis56069/<arm>/`, logs `/workspace/logs/xseg/`.
+- **SEGMENTATION IS THE NEXT PROBLEM (Tal):** the training map (`<SRC>/lvis56069_fine_segments.png`) has 4 segments; seg 1 = 68% of the horse
+  and joins the head with the front body -> nose->chest pairs count as in-segment. "Still not what we wanted."
+  - Fine segments come from **SAM 1** (vit_h `SamAutomaticMaskGenerator`, `analysis/build_fine_segments.py`) + merge 1.5% + fillseg; SAM 3 only makes the object mask.
+  - **Tal prefers SAM 3 for the parts too** (newer, already in use). SAM 3 has NO built-in automatic "segment everything" mode; it takes points/box
+    (SAM 1/2-style) or text. Proposed (not built, not decided): a point-grid wrapper on SAM 3 (generic, = what SAM 1 does today). Text prompts per part
+    ("horse head") conflict with the stay-generic rule. Also cheap to check first: the map BEFORE the 1.5% merge.
+- **NEXT:** Tal reviews the 4 SUMMARY figures + decides; segmentation (SAM 3 grid wrapper?); bear 159218 as 2nd example; read `|gap|` in the logs.
+- **Obsidian:** this pod has no vault access; an Obsidian-ready note of this session is at `workspace_meta/obsidian_inbox/2026-10-20 XSEG results.md`
+  for the Mac's Claude to move into `~/Documents/DISC` (then delete from the inbox).
+- New working rule (images via `SendUserFile`) added to "How Tal wants the assistant to work".
+
+## 2026-10-19 (MAC session, CPU only) — XSEG EXPERIMENT PLANNED + IMPLEMENTED. **RAN 2026-10-20, results in the entry above.**
 **Other news:** Tal's TAU VPN works (Run:ai reachable); Docker / Run:ai setup continues AFTER this experiment. Tal's Obsidian vault is on the
 Mac at `~/Documents/DISC` (the Mac's Claude writes it directly); meeting with Itai 2026-10-18 recorded there (`Meetings/2026-10-18 Itai.md`):
 RunPod guide screenshots; revisit feature RKD (Itai: "the features are unstable"); bilateral-style split, no hard threshold.
@@ -3733,6 +3766,9 @@ git config --global --add safe.directory /workspace/bsb
   content (paths, numbers, lists) in the same message is also hard to read —
   when a message contains any technical content, write the whole message in
   English rather than switching between the two languages within it.
+- **SHOWING IMAGES (Tal, 2026-10-20): send them with the `SendUserFile` tool (`display: "render"`), one call per image, with a
+  caption saying what the image is** (arm / run, key numbers). Markdown `![](path)` and plain file links do NOT render for Tal
+  (VS Code extension) -- he should never have to click a link to see a figure. When comparing, send new and old side by side.
 - **Don't use opaque step labels** ("A1/A2/A3"). Name the script or describe
   the step in a few words.
 - **Don't hesitate on tool permission prompts** — Tal approves every one.
