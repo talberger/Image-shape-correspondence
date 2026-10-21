@@ -101,6 +101,8 @@ Scripts: `analysis/fine_segments_check/` (README there). Figures on the Mac only
     **does the head separate from the chest?** Figure: one panel per level, same overlay as the SAM 1 sweep; show it to Tal.
   - Then Obsidian inbox note (short bullets + the figures, see the rule below). If a level works: wire it into `build_fine_segments.py`
     as an option and re-run XSEG `table` on the new map (Tal decides).
+- **NEW: `/start-work` and `/end-work` skills** in the repo (see "How Tal wants the assistant to work"). On the next pod: after the first
+  `git pull`, create the `/workspace/.claude/skills` link (one-time; the skill does it) so they are available when Claude starts in `/workspace`.
 - Mac state: SAM 1 vit_h checkpoint at `SAM_repo/model_checkpoints/` (gitignored); env `sam3hf`; git push from the Mac works over SSH.
   **TAU VPN on = RunPod SSH times out** (10-20): turn the VPN off for RunPod, on for Run:ai.
 
@@ -3806,6 +3808,11 @@ git config --global --add safe.directory /workspace/bsb
 - **OBSIDIAN FROM A POD (Tal, 2026-10-20):** write the note to `workspace_meta/obsidian_inbox/` and COPY its figures next to it
   (embedded `![[file.png]]`), then commit + push. Never only pod paths: the Mac cannot open them (`demo/`, `data/` are gitignored).
   On the Mac, Claude moves the note + images into `~/Documents/DISC` and empties the inbox.
+- **SESSION START / END = THE TWO REPO SKILLS (Tal, 2026-10-21):** `/start-work` and `/end-work`
+  (`.claude/skills/{start-work,end-work}/SKILL.md`, in git, same steps on the Mac and on a pod). Tal points to them instead of listing the
+  steps. A pod needs a one-time link because Tal starts Claude from `/workspace` (done by `/start-work` itself, or by hand:
+  `mkdir -p /workspace/.claude && ln -s /workspace/disc/.claude/skills /workspace/.claude/skills`). If the command is not listed, read the
+  SKILL.md file and follow it.
 - **OBSIDIAN NOTE STYLE (Tal, 2026-10-21): SHORT BULLETS + THE FIGURES, little prose.** Sections Goal / per-test (one or two bullets +
   its figure) / Conclusions / Next. Results as figures whenever there are any. Hebrew in the vault (the Mac's Claude translates inbox notes).
 - **Don't use opaque step labels** ("A1/A2/A3"). Name the script or describe
