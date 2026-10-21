@@ -69,6 +69,41 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
+## 2026-10-21 (MAC session, CPU only) — FINE SEGMENTS: SAM 1 / SAM 3 / UnSAMv2 CANNOT SPLIT HEAD FROM CHEST. **NEXT = SEMANTIC-SAM ON A GPU POD.**
+**Why:** XSEG (10-20) found the training map of horse 56069 has 4 segments, one = 68% of the horse joining the head with the chest + left
+body, so nose->chest pairs count as in-segment. Obsidian note (Hebrew, figures): `~/Documents/DISC/Experiments/2026-10-21 Fine segments.md`.
+Scripts: `analysis/fine_segments_check/` (README there). Figures on the Mac only: `demo/shic/fine_segments_sweep/horse_lvis56069/`.
+- **SAM 1 (`build_fine_segments.py`, vit_h AMG, our defaults copied from BSB's `encoder.py:97`, pred_iou 0.90 / stability 0.92 / box NMS 0.7):**
+  - The Mac reproduces the pod's map exactly at 0.90 + merge 1.5% + fillseg (4 segs 67.7 / 28.6 / 2.1 / 1.6) -> CPU == GPU here.
+  - **The 65.6% head + chest + left-body segment is ALREADY in SAM's raw map** -- not made by our 1.5% merge (the merge only eats eye / mane / strap).
+  - pred_iou 0.90 / 0.88 / 0.85 / 0.80: 56 -> 68 masks, 15 -> 17 raw segments, largest stays 65.6%. box_nms 0.7/0.85/0.95 x stability 0.92/0.85:
+    largest 65.2-65.6% in all 6. Single point prompts (multimask): the FINEST mask from the nose / forehead / between the eyes is already
+    head + chest + left body (63-71%); a head-only mask does not exist for SAM 1. Right body separates (28%).
+  - NOTE: `--crop_n_points_downscale_factor 2` does nothing (crop_n_layers is 0 and not exposed).
+- **SAM 3 automatic:** Meta ships NO automatic mode (facebookresearch/sam3 issues #435, #371, #226, no maintainer answer). Hugging Face
+  `transformers` 5.14.0 has `pipeline("mask-generation", model="facebook/sam3")` (point grid on SAM 3's SAM-2-style tracker head). Run on
+  the Mac in a NEW env `sam3hf` (py 3.12, torch 2.8.0, transformers 5.14.0, conda-forge; `disc` untouched; HF login done on the Mac):
+  default -> ONE mask (whole horse); pred_iou 0.5-0.3 / stability 0.8-0.7 / NMS 0.9 -> largest 93.7-94.4%, only ears / eye / strap added.
+  `crops_n_layers=1` CRASHES inside transformers (torch.stack of different crop sizes) -- library bug, not patched. **Worse than SAM 1 here.**
+  Paper: SAM 3's 1-click interactive mIoU 66.1 vs SAM 2.1 66.4 -> no reason to expect better parts; its novelty is TEXT concepts (not generic).
+- **UnSAMv2** (SAM 2.1-based, continuous granularity, Apache 2.0): Tal tried the HF Space demo (whole image + interactive), no granularity
+  splits the horse. **Roboflow** = a platform (hosts SAM / YOLO, labeling, training), not a part model -> no.
+- **Conclusion:** the SAM family separates by colour / boundaries; a frontal horse's head and chest are the same colour -> no split.
+  PartGLEE's paper says the same ("SAM ... predominantly relies on colors or boundaries ... especially for animals"). Need a model trained on PARTS.
+- **NEXT (Tal, GPU pod): Semantic-SAM** (github.com/UX-Decoder/Semantic-SAM, ECCV 2024; trained on SA-1B + part datasets incl.
+  PartImageNet = quadruped head / body / foot / tail; automatic generator with 6 granularity levels, class-agnostic output). Its web demos
+  (semantic-sam.xyzou.net:6098 / :6080) were DOWN on 10-21. Needs detectron2 + a custom CUDA op (deformable attention) -> pod only.
+  - Install in its OWN clone + env at `$DISC_WS/semantic_sam_repo` (do not touch `disc` / the sam3 env); follow its README / INSTALL for the
+    exact versions and checkpoint -- not verified from the Mac. Our wrapper scripts go to `external/semantic_sam/` (git source of truth).
+  - Run its automatic mask generator on `data/densepose_lvis/runs_debug_merge0.015_amodal_fillseg_sam3mask/lvis56069/lvis56069.png`, EVERY
+    granularity level separately; turn each into a label map with `build_fine_segments.py::build_label_map` (min_pixels 50; template:
+    `analysis/fine_segments_check/sam3_hf_auto.py`), raw and with merge 1.5% + fillseg. Report per level: #segments, largest %, and
+    **does the head separate from the chest?** Figure: one panel per level, same overlay as the SAM 1 sweep; show it to Tal.
+  - Then Obsidian inbox note (short bullets + the figures, see the rule below). If a level works: wire it into `build_fine_segments.py`
+    as an option and re-run XSEG `table` on the new map (Tal decides).
+- Mac state: SAM 1 vit_h checkpoint at `SAM_repo/model_checkpoints/` (gitignored); env `sam3hf`; git push from the Mac works over SSH.
+  **TAU VPN on = RunPod SSH times out** (10-20): turn the VPN off for RunPod, on for Run:ai.
+
 ## STATE AT POD CLOSE — 2026-10-20 (fiftieth pod, RTX 2000 Ada) — XSEG RUN, ALL 4 ARMS DONE. **NOTHING IS RUNNING.** Tal reviews the results.
 - **Ran the 10-19 plan as written** (`a566d3b`). Smoke test (`ARM=balance`) passed: `XSEG check` in-slice 1.0000 / cross-slice 0.0000; three
   `XSEG_WEIGHT` lines, table 1.0890e-01 / wonly 4.0686e-02 / Fonly 7.0602e-03 (re-run inside the queue: identical to the last digit = deterministic).
@@ -3771,6 +3806,8 @@ git config --global --add safe.directory /workspace/bsb
 - **OBSIDIAN FROM A POD (Tal, 2026-10-20):** write the note to `workspace_meta/obsidian_inbox/` and COPY its figures next to it
   (embedded `![[file.png]]`), then commit + push. Never only pod paths: the Mac cannot open them (`demo/`, `data/` are gitignored).
   On the Mac, Claude moves the note + images into `~/Documents/DISC` and empties the inbox.
+- **OBSIDIAN NOTE STYLE (Tal, 2026-10-21): SHORT BULLETS + THE FIGURES, little prose.** Sections Goal / per-test (one or two bullets +
+  its figure) / Conclusions / Next. Results as figures whenever there are any. Hebrew in the vault (the Mac's Claude translates inbox notes).
 - **Don't use opaque step labels** ("A1/A2/A3"). Name the script or describe
   the step in a few words.
 - **Don't hesitate on tool permission prompts** — Tal approves every one.
