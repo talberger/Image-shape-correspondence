@@ -69,7 +69,39 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
-## 2026-10-21 (MAC session, CPU only) — FINE SEGMENTS: SAM 1 / SAM 3 / UnSAMv2 CANNOT SPLIT HEAD FROM CHEST. **NEXT = SEMANTIC-SAM ON A GPU POD.**
+## STATE AT CLOSE — 2026-10-21 (fifty-first pod, RTX 2000 Ada) — VLPART PART MAP SPLITS HEAD FROM CHEST; ALL 4 XSEG ARMS RE-RUN ON IT. **NOTHING IS RUNNING.**
+- **Semantic-SAM dropped before install:** its README says "The currently released checkpoints are only trained with SA-1B data" (SwinT + SwinL)
+  -> no part training in any public weights, same data as SAM. Clone left at `$DISC_WS/semantic_sam_repo` (no env). The 10-21 Mac entry's
+  "trained on SA-1B + part datasets" is true of the PAPER only.
+- **VLPart** (github.com/facebookresearch/VLPart, Tal chose it over PartGLEE, which has no demo code released): clone `$DISC_WS/vlpart_repo`,
+  env `vlpart` (py 3.10, torch 2.4.1 cu124, detectron2 from source at `$DISC_WS/detectron2_src`, sm_89; conda needs `-c conda-forge --override-channels`,
+  ToS), checkpoint `models/swinbase_cascade_lvis_paco_pascalpart_partimagenet_inparsed.pth`. Install script `$DISC_WS/logs/vlpart/install.sh`.
+  - **Labelled parts, not class-agnostic:** fixed vocabulary. The masks are the SAME in both vocabularies, only the names change.
+    partimagenet: head 46% / body 50% + 24% / feet. pascal_part: + ears, eyes, muzzle 23%, neck 18% (box-shaped, unreliable at score 0.49).
+  - **Head separates from chest** (first model that does). Map options (merge 1.5% + fillseg, `analysis/fine_segments_check/vlpart_label_maps.py`):
+    SAM 1 68/29/2/2; partimagenet>=0.3 48/27/24/2; **pascal_part>=0.5 52 body / 23 muzzle / 21 head / 2 / 2 ears (Tal chose this one)**; pascal_part>=0.3 + neck.
+  - Per-part dump: `external/vlpart/dump_instances.py` (run inside `$DISC_WS/vlpart_repo`, env vlpart). Map file:
+    `data/densepose_lvis/fine_segments_vlpart/lvis56069_fine_segments_pascalpart_thr0.5.pth` (int32 [400,271], same format as `_fine_segments.pth`).
+- **XSEG re-run on the VLPart 5-seg map** (all else as 10-20; balance re-run: table 4.1373e-02 / wonly 4.5029e-02 / Fonly 6.7690e-03; XSEG check 1/0):
+  | arm | pt1 | pt2 | pt3 nose | mean | mean, SAM 1 map (10-20) |
+  |---|---|---|---|---|---|
+  | ZS | 6.3 | 24.6 | 0.0 | 10.3 | |
+  | perseg (exp 0) | 12.8 | 15.8 | 3.3 | 10.6 | 18.0 |
+  | table | 11.8 | 21.5 | 2.3 | 11.9 | 12.6 |
+  | wonly | 9.7 | 20.1 | 19.9 | 16.6 | 23.1 |
+  | **Fonly** | 11.0 | **14.6** | 3.2 | **9.6** | 24.3 |
+  | SHIC | 2.3 | 18.3 | 0.0 | 6.9 | |
+  - Better map -> every arm improves. Fonly is the first arm under ZS (9.6 vs 10.3), within cross-pod noise (~2). pt1 worse than ZS in every arm.
+    1 instance, 1 seed. **Tal has not reviewed the figures yet** ("looks interesting").
+  - `scripts/run_xseg_horse.sh`: new `FINESEG=<map .pth> SEGTAG=<name>` (-> `runs_xseg_<name>/`, `demo/shic/xseg_<name>/`, `logs/xseg_<name>/`)
+    and `ARM=balance_table`. Reproduce: `FINESEG=<above> SEGTAG=vlpart5 ARM=all bash scripts/run_xseg_horse.sh`.
+  - Figures (v2 SUMMARY): `demo/shic/xseg_vlpart5/horse_lvis56069/<arm>/summary/SUMMARY_lvis56069.png`; map options
+    `demo/shic/fine_segments_vlpart/horse_lvis56069/options/options_lvis56069.png`; runs `data/densepose_lvis/runs_xseg_vlpart5/`; logs `$DISC_WS/logs/xseg_vlpart5/`.
+- **NEXT:** Tal reviews the 4 figures + decides; if VLPart stays: wire it into `build_fine_segments.py` as an option; 2nd example (bear 159218) to see
+  if the gain holds; a 2nd seed for Fonly vs ZS; read `|gap|` in the logs (still open from 10-20).
+- `/end-work` was not listed in this session because Claude was started from `/root`, not `/workspace` (the skills link exists now).
+
+## 2026-10-21 (MAC session, CPU only) — FINE SEGMENTS: SAM 1 / SAM 3 / UnSAMv2 CANNOT SPLIT HEAD FROM CHEST. **NEXT = SEMANTIC-SAM ON A GPU POD.** (Superseded 10-21 pod: Semantic-SAM's public weights are SA-1B only; VLPart used instead, entry above.)
 **Why:** XSEG (10-20) found the training map of horse 56069 has 4 segments, one = 68% of the horse joining the head with the chest + left
 body, so nose->chest pairs count as in-segment. Obsidian note (Hebrew, figures): `~/Documents/DISC/Experiments/2026-10-21 Fine segments.md`.
 Scripts: `analysis/fine_segments_check/` (README there). Figures on the Mac only: `demo/shic/fine_segments_sweep/horse_lvis56069/`.

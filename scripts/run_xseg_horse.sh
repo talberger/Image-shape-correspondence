@@ -8,13 +8,15 @@
 #   ARM=balance calibration: 25 steps of in-segment spatial + cycle, then the grad norms of all three feature modes
 #   ARM=table|wonly|Fonly  exp 1, cross-segment feature student (see xseg_feat_loss in modules/feature_rkd_loss.py);
 #                          needs WEIGHT=<w> (from ARM=balance, equal grad norms = Tal's "similar proportion")
+#   ARM=balance_table  balance, then table at the equal-grad-norm weight (/RATIO)
 #   ARM=all     the whole queue: perseg, balance, then the three arms at the equal-grad-norm weights (RATIO=1 default)
 #
 # Everything else = the current LVIS recipe of the two-stage run it is compared with (LoRA-W all r4 lr 1e-3, read at alpha 0.5,
 # cycle v2 c=1.676e-5 T_cyc=0.05 return stride 3, T=0.01, mu lr 5e-2), on that run's own inputs (SAM 3 mask, merge 1.5%,
 # fillseg; the horse mask is in one piece, so no amodal domain). GPU only (training + rendering-free eval).
 # Output: runs data/densepose_lvis/runs_xseg/lvis56069/<arm>/, eval + back-projection demo/shic/xseg/horse_lvis56069/<arm>/,
-# logs $DISC_WS/logs/xseg/<arm>.log. ~6-8 min per arm on an RTX 2000 Ada (estimate, not measured).
+# logs $DISC_WS/logs/xseg/<arm>.log.
+# Other segment map (2026-10-21, VLPart): FINESEG=<label map .pth> SEGTAG=<name> -> runs_xseg_<name>/, xseg_<name>/, logs/xseg_<name>/. ~6-8 min per arm on an RTX 2000 Ada (estimate, not measured).
 set -euo pipefail
 source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
 ARM=${ARM:?ARM=perseg|balance|table|wonly|Fonly|all}
@@ -26,9 +28,10 @@ GEO3D=./experiments/shic_$CLASS/geodesic_tables/shic_${CLASS}_geo_table_3d.pth
 GEO228=data/densepose_lvis/eval_shic_$CLASS/${CLASS}_heat_geodesics_228.npy
 CHK=demo/shic/colored_mesh/${CLASS}_mesh_checker16_uv_color.pth
 POSCOL=demo/shic/debug_twostage/${CLASS}_${TAG}_merge0.015_amodal_fillseg_sam3mask/summary/backproj_$TAG/${TAG}_position_color.png
-RUNS=data/densepose_lvis/runs_xseg/$TAG; DEMO=demo/shic/xseg/${CLASS}_$TAG; LOGS=$DISC_WS/logs/xseg
+FINESEG=${FINESEG:-$SRC/${TAG}_fine_segments.pth}; SEGTAG=${SEGTAG:+_$SEGTAG}
+RUNS=data/densepose_lvis/runs_xseg$SEGTAG/$TAG; DEMO=demo/shic/xseg$SEGTAG/${CLASS}_$TAG; LOGS=$DISC_WS/logs/xseg$SEGTAG
 mkdir -p $RUNS $DEMO $LOGS
-for f in $SRC/${TAG}_mask.pth $SRC/${TAG}_fine_segments.pth $SRC/${TAG}_pix_sdsquare_fuse16.pth $SRC/${TAG}_mask_geo_table_2d_seed0.pth \
+for f in $SRC/${TAG}_mask.pth $FINESEG $SRC/${TAG}_pix_sdsquare_fuse16.pth $SRC/${TAG}_mask_geo_table_2d_seed0.pth \
          $SRC/${TAG}_gt.pth $TWOSTAGE $P1/encoder_checkpoint.pth $GEO3D $GEO228 $CHK $POSCOL; do
   [ -e "$f" ] || { echo "MISSING INPUT $f"; exit 1; }
 done
@@ -38,7 +41,7 @@ phase2() {  # out_dir, extra flags...
   local out=$1; shift
   PYTHONUNBUFFERED=1 python phase2/train_relational_loss_l2norm.py \
     --obj_path $OBJ --name $NAME --init_encoder_dir $P1 \
-    --object_mask_path $SRC/${TAG}_mask.pth --fine_seg_path $SRC/${TAG}_fine_segments.pth \
+    --object_mask_path $SRC/${TAG}_mask.pth --fine_seg_path $FINESEG \
     --pix_dino_features_path $SRC/${TAG}_pix_sdsquare_fuse16.pth \
     --width 2304 --n_classes 2304 --geodesic --temperature 0.01 --train_seed 0 --geo_diag_2d $DIAG \
     --geo_table_3d_path $GEO3D --geo_table_2d_path $SRC/${TAG}_mask_geo_table_2d_seed0.pth \
@@ -92,10 +95,11 @@ case $ARM in
   perseg) run_arm perseg 2>&1 | tee $LOGS/perseg.log ;;
   balance) balance 2>&1 | tee $LOGS/balance.log ;;
   table|wonly|Fonly) run_arm $ARM ${WEIGHT:?WEIGHT=<w> from ARM=balance} 2>&1 | tee $LOGS/$ARM.log ;;
-  all)
-    run_arm perseg 2>&1 | tee $LOGS/perseg.log
+  all|balance_table)
+    [ $ARM = all ] && run_arm perseg 2>&1 | tee $LOGS/perseg.log
     balance 2>&1 | tee $LOGS/balance.log
-    for m in table wonly Fonly; do
+    [ $ARM = all ] && MODES="table wonly Fonly" || MODES=table
+    for m in $MODES; do
       w=$(python -c "
 import re, sys
 for l in open('$LOGS/balance.log'):
