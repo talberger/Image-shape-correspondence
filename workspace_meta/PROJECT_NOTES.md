@@ -100,6 +100,8 @@ Goal (long-term): dense correspondence between an image and a 3D object.
 - **NEXT:** Tal reviews the 4 figures + decides; if VLPart stays: wire it into `build_fine_segments.py` as an option; 2nd example (bear 159218) to see
   if the gain holds; a 2nd seed for Fonly vs ZS; read `|gap|` in the logs (still open from 10-20).
 - `/end-work` was not listed in this session because Claude was started from `/root`, not `/workspace` (the skills link exists now).
+- **Obsidian:** DONE (Mac, 2026-10-21): the inbox note was merged into the two existing vault notes (`2026-10-21 Fine segments.md`: Semantic-SAM
+  + VLPart sections; `2026-10-19 XSEG cross-segment feature RKD.md`: "Results 2" on the VLPart map), figures in `Experiments/attachments/`; inbox emptied.
 
 ## 2026-10-21 (MAC session, CPU only) — FINE SEGMENTS: SAM 1 / SAM 3 / UnSAMv2 CANNOT SPLIT HEAD FROM CHEST. **NEXT = SEMANTIC-SAM ON A GPU POD.** (Superseded 10-21 pod: Semantic-SAM's public weights are SA-1B only; VLPart used instead, entry above.)
 **Why:** XSEG (10-20) found the training map of horse 56069 has 4 segments, one = 68% of the horse joining the head with the chest + left
