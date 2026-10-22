@@ -124,7 +124,7 @@ Goal (long-term): dense correspondence between an image and a 3D object.
   (b) cross-segment pairs keep the 2D geodesic by default and switch to the feature teacher only where the geodesic is suspect (parts touching in the
   photo but far apart in features, e.g. nose/belly); (c) a generic coarse-segment rule for any object (Tal: must work for non-animals too; idea: merge by
   area threshold ~8-10%, or a generic custom VLPart vocabulary). Still open from 10-21: 2nd seed, `|gap|` in the logs, bear 159218.
-- **Obsidian:** inbox note `workspace_meta/obsidian_inbox/2026-10-22 XSEG 4-seg + Leg Collision/` (Hebrew, 4 figures).
+- **Obsidian:** DONE (Mac, 2026-10-22): the inbox note was merged into `2026-10-19 XSEG cross-segment feature RKD.md` as "Results 3" (+ Next updated), 4 figures in `Experiments/attachments/`; inbox emptied. SYNC TO MAC paths copied.
 - SYNC TO MAC: demo/shic/xseg_vlpart4/horse_lvis56069/backproj_all_arms_lvis56069.png demo/shic/xseg_164135_vlpart8/backproj_compare_lvis164135.png demo/shic/lvis164135_mu/figures/leg_collision_compare/seg3_ZS_twostage_perseg_xsegFonly_cols234.png demo/shic/lvis164135_mu/figures/leg_collision_compare/seg3_ZS_twostage_perseg_cols234.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/leg_seg3 demo/shic/xseg_164135_sam1/horse_lvis164135/leg_seg3 demo/shic/fine_segments_vlpart/horse_lvis164135/options data/densepose_lvis/fine_segments_vlpart/lvis164135_fine_segments_partimagenet_thr0.3.pth data/densepose_lvis/fine_segments_vlpart/lvis56069_fine_segments_partimagenet_thr0.3.pth
 
 ## STATE AT CLOSE — 2026-10-21 (fifty-first pod, RTX 2000 Ada) — VLPART PART MAP SPLITS HEAD FROM CHEST; ALL 4 XSEG ARMS RE-RUN ON IT. **NOTHING IS RUNNING.**

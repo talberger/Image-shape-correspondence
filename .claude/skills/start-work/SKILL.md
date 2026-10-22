@@ -36,6 +36,7 @@ Say which one in the first line of the summary.
 - Check the pod is up, with exactly `ssh -o ConnectTimeout=8 -o BatchMode=yes -o StrictHostKeyChecking=accept-new runpod "echo CONNECTED && whoami"`.
 - If it connects: read the address with `ssh -G runpod | awk '/^hostname |^port /'` and run
   `bash scripts/sync_from_pod.sh <hostname> <port> <the listed paths>` (pull-only, copies only what changed; long ones in the background).
+  The Mac shell is zsh: it does NOT word-split `$P`, so pass the paths as separate words (`${=P}`, or paste them literally).
 - If it does not connect: the pod is probably closed, or the TAU VPN is on (VPN on = RunPod SSH times out). Say which paths were NOT
   copied and go on; do not retry with other commands.
 
