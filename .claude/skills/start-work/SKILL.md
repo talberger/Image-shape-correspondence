@@ -13,8 +13,10 @@ Reply to Tal in short Hebrew. Do the steps in order; stop and report if one fail
 Say which one in the first line of the summary.
 
 ## 2. Code and env
-- `cd <repo> && git pull --ff-only`. If it fails (local changes, diverged branch), STOP and show `git status` -- do not stash, reset or merge on your own.
-- Activate: Mac `source env/activate.sh`; pod `source /workspace/activate_bsb.sh` (it also installs the deploy key that push needs).
+- Activate FIRST, in the same shell command as the pull: Mac `source env/activate.sh`; pod `source /workspace/activate_bsb.sh`
+  (it installs the deploy key; without it pull fails with "Please make sure you have the correct access rights").
+- `cd <repo> && <activate> && git pull --ff-only`. If it fails (local changes, diverged branch), STOP and show `git status` -- do not stash, reset or merge on your own.
+- Shell state does not carry between tool calls: re-source the activate script in any later command that needs `$DISC_WS` or the env.
 - `git status -s`: report anything uncommitted that was left over from before.
 
 ## 3. Pod only
