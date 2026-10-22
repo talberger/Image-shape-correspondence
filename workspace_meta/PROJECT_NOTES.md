@@ -120,6 +120,7 @@ Goal (long-term): dense correspondence between an image and a 3D object.
     **Rebuild the tar after installing anything into the env** (command in the script header). Tal: check on the next pod whether the volume is still slow.
   - `/start-work` skill: activate BEFORE `git pull` (the deploy key is installed by the activation).
 - Runs `data/densepose_lvis/runs_xseg_{vlpart4,164135_sam1,164135_vlpart8}/`, logs `/workspace/logs/xseg_{vlpart4,164135_sam1,164135_vlpart8}/`.
+- **REMIND TAL (Mac, 2026-10-22):** draft a simple email to Itai summarising pods 50-52 (XSEG + VLPart + leg collision). Pod 52 closed.
 - **NEXT:** Tal summarises everything and decides. Options raised: (a) two-stage (global stage A) on the VLPart map of 164135 -- does it keep 2.9 AND fix the leg;
   (b) cross-segment pairs keep the 2D geodesic by default and switch to the feature teacher only where the geodesic is suspect (parts touching in the
   photo but far apart in features, e.g. nose/belly); (c) a generic coarse-segment rule for any object (Tal: must work for non-animals too; idea: merge by
