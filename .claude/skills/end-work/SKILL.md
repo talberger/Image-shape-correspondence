@@ -30,9 +30,10 @@ Style rule in the notes: Hebrew, SHORT bullets, figures embedded (`![[file.png]]
 Show Tal the figures (SendUserFile, display render) rather than only naming paths.
 
 ## 4. Pod only: data for the Mac
-List the outputs of this session that Tal may want to look at on the Mac (figures, eval jsons, small run results -- not checkpoints
-unless asked) and give the command to run ON THE MAC: `bash scripts/sync_from_pod.sh <pod IP> <SSH port> <repo-relative paths ...>`.
-Remind: the TAU VPN must be OFF for RunPod SSH.
+List the outputs of this session that Tal may want on the Mac (figures, eval jsons, part maps, small run results -- not checkpoints
+unless asked). Write them into the notes entry as ONE line, repo-relative paths separated by spaces:
+`SYNC TO MAC: demo/shic/... data/densepose_lvis/...` -- the Mac's `/start-work` reads that line and copies them while the pod is still up.
+Tell Tal to run `/start-work` on the Mac BEFORE closing the pod (TAU VPN off).
 
 ## 5. Git
 `git add` only code, scripts, notes and the Obsidian inbox (never data, checkpoints or secrets); `git status -s` to check; commit with a

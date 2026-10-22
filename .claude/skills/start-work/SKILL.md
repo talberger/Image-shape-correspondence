@@ -26,13 +26,22 @@ Say which one in the first line of the summary.
   (see `external/README.md`).
 - Check nothing from an earlier session is still running (`ps aux | grep -E "python|train" | grep -v grep`) and say so.
 
-## 4. Mac only: Obsidian inbox
+## 4. Mac only: data from the pod
+`git pull` brings code and notes only; `data/` and `demo/` are gitignored. If the top notes entry (written by a pod's `/end-work`) has a
+`SYNC TO MAC:` line, copy those paths now:
+- Check the pod is up, with exactly `ssh -o ConnectTimeout=8 -o BatchMode=yes -o StrictHostKeyChecking=accept-new runpod "echo CONNECTED && whoami"`.
+- If it connects: read the address with `ssh -G runpod | awk '/^hostname |^port /'` and run
+  `bash scripts/sync_from_pod.sh <hostname> <port> <the listed paths>` (pull-only, copies only what changed; long ones in the background).
+- If it does not connect: the pod is probably closed, or the TAU VPN is on (VPN on = RunPod SSH times out). Say which paths were NOT
+  copied and go on; do not retry with other commands.
+
+## 5. Mac only: Obsidian inbox
 If `workspace_meta/obsidian_inbox/` has notes from a pod: move each into the vault `~/Documents/DISC` following the
 "OBSIDIAN NOTE STYLE" rule in PROJECT_NOTES.md (Hebrew, short bullets, figures embedded; images into `Experiments/attachments/` with an
 `lvis<id>_<topic>_` prefix; a link in `DISC.md`). If the note continues an existing experiment, update that note instead of making a new one.
 Then `git rm` the inbox files, mark it done in the notes entry that created them, commit + push.
 
-## 5. Where we stand
+## 6. Where we stand
 Read `workspace_meta/PROJECT_NOTES.md`: the short header and the TOP one or two dated entries (not the whole file, it is ~4000 lines),
 plus the "How Tal wants the assistant to work" section if this session has not seen it. Then tell Tal, in 3-4 short lines:
 - what the last session did and its result,
