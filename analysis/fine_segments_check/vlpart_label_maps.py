@@ -9,12 +9,16 @@ from build_fine_segments import build_label_map, merge_small_segments, fill_unla
 p = argparse.ArgumentParser()
 p.add_argument('--src', required=True); p.add_argument('--ann_id', default='56069')
 p.add_argument('--vlpart_dir', required=True); p.add_argument('--save_dir', required=True)
+p.add_argument('--options', default=None, help='vocab:thr,... (default partimagenet:0.3,pascal_part:0.5,pascal_part:0.3)')
+p.add_argument('--out_name', default=None, help='figure name, default options_lvis<id>.png')
+p.add_argument('--mask_suffix', default='_sam3_mask.pth', help="object mask file next to the image (164135's old inputs: '_mask.pth')")
 a = p.parse_args()
 img = np.array(Image.open(f'{a.src}/lvis{a.ann_id}/lvis{a.ann_id}.png').convert('RGB'))
-fg = load_coarse_mask(f'{a.src}/lvis{a.ann_id}/lvis{a.ann_id}_sam3_mask.pth')
+fg = load_coarse_mask(f'{a.src}/lvis{a.ann_id}/lvis{a.ann_id}{a.mask_suffix}')
 os.makedirs(a.save_dir, exist_ok=True)
 cur = torch.load(f'{a.src}/lvis{a.ann_id}/lvis{a.ann_id}_fine_segments.pth').numpy()
-options = [('partimagenet', 0.3), ('pascal_part', 0.5), ('pascal_part', 0.3)]
+p2 = a.options.split(',') if a.options else ['partimagenet:0.3', 'pascal_part:0.5', 'pascal_part:0.3']
+options = [(o.split(':')[0], float(o.split(':')[1])) for o in p2]
 panels = [('current SAM 1 map', cur)]
 for vocab, thr in options:
     d = torch.load(f'{a.vlpart_dir}/{vocab}/instances.pth')
@@ -32,4 +36,4 @@ for ax, (title, lab) in zip(axs, panels):
     fr = sorted([100 * (lab == i).sum() / fg.sum() for i in range(1, n + 1)], reverse=True)
     ax.set_title(f'{title}\n{n} segs: ' + ' / '.join(f'{f:.0f}' for f in fr) + ' %', fontsize=9)
     print(f'{title:35s} {n} segs: ' + ' / '.join(f'{f:.1f}' for f in fr))
-fig.tight_layout(); fig.savefig(f'{a.save_dir}/options_lvis{a.ann_id}.png', dpi=110); plt.close(fig)
+fig.tight_layout(); fig.savefig(f'{a.save_dir}/' + (a.out_name or f'options_lvis{a.ann_id}.png'), dpi=110); plt.close(fig)

@@ -69,6 +69,64 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
+## STATE AT CLOSE — 2026-10-22 (fifty-second pod, RTX 4000 Ada 20 GB) — XSEG ON A 4-SEG MAP + NEW `full` ARM; XSEG ON HORSE 164135 (LEG COLLISION) DOES NOT SEPARATE THE LEGS. **NOTHING IS RUNNING.**
+- **New arm `full`** (`--xseg_feat_mode full`, Tal): cross-segment feature RKD with NOTHING detached (V and w live; may form a cycle, accepted).
+  `balance` now also reports its weight; `ARM=all` runs perseg, balance, table, wonly, Fonly, full.
+- **Horse 56069, VLPart partimagenet>=0.3 map (4 segs 48/27/24/2; "head" still includes neck + upper chest)**, SEGTAG=vlpart4:
+  | arm | pt1 | pt2 | pt3 nose | mean | mean, 5-seg map (10-21) |
+  |---|---|---|---|---|---|
+  | ZS | 6.3 | 24.6 | 0.0 | 10.3 | 10.3 |
+  | perseg | 6.0 | 21.5 | 6.8 | 11.5 | 10.6 |
+  | table | 5.3 | 23.6 | 3.7 | 10.9 | 11.9 |
+  | wonly | 13.3 | 29.2 | 7.3 | 16.6 | 16.6 |
+  | Fonly | 7.5 | 23.6 | 4.8 | 12.0 | 9.6 |
+  | full | 6.0 | 21.5 | 5.1 | 10.9 | |
+  No arm under ZS; all within ~2 noise. One-row figure (mesh key, photo, seg map, SHIC, old two-stage, 5 arms): `demo/shic/xseg_vlpart4/horse_lvis56069/backproj_all_arms_lvis56069.png`;
+  v2 SUMMARYs `demo/shic/xseg_vlpart4/horse_lvis56069/<arm>/summary/SUMMARY_lvis56069.png`.
+- **Horse 164135 (Leg Collision, seg 3 = front leg, correct = x-)**, inputs = the 09-28 ones (`data/densepose_lvis/runs/lvis164135/`), compared with the 09-28 two-stage sw150 run.
+  Two maps: old SAM 1 map (SEGTAG=164135_sam1) and VLPart partimagenet>=0.3 (8 segs, every leg its own segment; SEGTAG=164135_vlpart8, own 2D geo table, see below).
+  | arm | mean, old map | mean, VLPart | leg (VLPart) x- / x+ / mixed |
+  |---|---|---|---|
+  | ZS | 13.3 | 13.3 | 37 / 63 / 61 |
+  | two-stage (09-28) | 6.4 | 6.4 | **100 / 0 / 2** |
+  | perseg | 6.3 | **2.9** | 24 / 76 / 46 |
+  | table | 9.2 | 5.9 | 27 / 73 / 66 |
+  | wonly | 10.7 | 19.5 | 29 / 71 / 42 |
+  | Fonly | 6.5 | **2.9** | 46 / 54 / 45 |
+  | full | 6.5 | **2.9** | 44 / 56 / 50 |
+  Old map leg: perseg 45/55/28, table 1/99/24 (consistent but WRONG leg), wonly 35/58/34, Fonly 37/63/23, full 34/66/26.
+  - **Tal's reading: XSEG does not learn cross-segment relations** -- cross pairs follow FEATURES, not paths, and the two legs look alike in features,
+    so the feature teacher pulls them together. The 2D geodesic is the wrong teacher on 56069 (nose/belly touch in the photo) and the RIGHT one on 164135.
+    **Of the XSEG arms, Fonly and full are the most reasonable (Tal).** He wants to see everything summarised before deciding the direction.
+  - VLPart map halves the 3-point error but does not fix the leg; the 3 GT points do not see the leg, so the two metrics disagree.
+  - Ablation figure Tal asked for (rows ZS / two-stage / per-seg only [= mu_aniso_perseg, same recipe without stage A] / XSEG Fonly old map, cols 2-4):
+    `demo/shic/lvis164135_mu/figures/leg_collision_compare/seg3_ZS_twostage_perseg_xsegFonly_cols234.png` (+ 3-row version without Fonly).
+  - The end-of-stage-A analysis already existed (09-29): `demo/shic/lvis164135_mu/figures/manual_ellipses_B/seg3_mapping_step150_alpha0.5.png`.
+  - Figures: back-proj both maps `demo/shic/xseg_164135_vlpart8/backproj_compare_lvis164135.png` (script next to it, `make_backproj_compare.py`, in demo/ = not in git);
+    leg per map `demo/shic/xseg_164135_{sam1,vlpart8}/horse_lvis164135/leg_seg3/`; partimagenet threshold options
+    `demo/shic/fine_segments_vlpart/horse_lvis164135/options/options_partimagenet_thr{,_high}_lvis164135.png` (0.3 / 0.38 = 8 segs, 0.4-0.46 = 6, 0.48 = 5, >=0.49 body drops -> 2).
+- **Code (commit below):**
+  - `scripts/run_xseg_horse.sh`: other instance via `TAG= SRC= TWOSTAGE= POSCOL= GEO2D=`; the 4 analysis scripts run in ONE python process
+    (`analysis/run_in_one_process.py`, verified identical eval); each arm's analysis runs in the background while the next arm trains.
+    Reproduce 164135 VLPart: `GEO2D=data/densepose_lvis/fine_segments_vlpart/geo_lvis164135_vlpart8/lvis164135_mask_geo_table_2d_seed0.pth TAG=lvis164135
+    SEGTAG=164135_vlpart8 FINESEG=data/densepose_lvis/fine_segments_vlpart/lvis164135_fine_segments_partimagenet_thr0.3.pth SRC=data/densepose_lvis/runs/lvis164135
+    TWOSTAGE=<09-28 sw150 run>/alpha/alpha0.5/pred_f.pth POSCOL=demo/shic/lvis164135_mu/ZS_phase1/backproj_lvis164135/lvis164135_position_color.png ARM=all bash scripts/run_xseg_horse.sh`.
+  - **TRAP: a new segment map needs its own 2D geo table** -- centres are sampled from LABELLED pixels, so a map with different holes (fillseg vs the old map)
+    fails the "stored centers do not match" check. Build: `analysis/build_geodesic_tables.py --skip_3d --fine_seg_path <map> --num_center_pixels 2048 --seed 0 --true_diameter --out_dir <dir>`.
+  - `analysis/diag_seg_mapping.py --cols 2 3 4` (keep only some columns); `analysis/fine_segments_check/vlpart_label_maps.py --options vocab:thr,... --mask_suffix --out_name`.
+  - **SLOW VOLUME / LOCAL ENV:** on this pod every small file on /workspace cost ~30 ms -> `import torch` ~60 s, arms ~15 min instead of ~9.
+    Fix: env packed ONCE with conda-pack to `/workspace/env_packs/disc.tar` (11 GB; packing took 36 min); `env/pod_local_env.sh` unpacks it to
+    `/root/disc_env` (**118 s** on this pod) and `env/activate.sh` uses it once `READY` exists (imports then take seconds). `/start-work` starts it in the background.
+    **Rebuild the tar after installing anything into the env** (command in the script header). Tal: check on the next pod whether the volume is still slow.
+  - `/start-work` skill: activate BEFORE `git pull` (the deploy key is installed by the activation).
+- Runs `data/densepose_lvis/runs_xseg_{vlpart4,164135_sam1,164135_vlpart8}/`, logs `/workspace/logs/xseg_{vlpart4,164135_sam1,164135_vlpart8}/`.
+- **NEXT:** Tal summarises everything and decides. Options raised: (a) two-stage (global stage A) on the VLPart map of 164135 -- does it keep 2.9 AND fix the leg;
+  (b) cross-segment pairs keep the 2D geodesic by default and switch to the feature teacher only where the geodesic is suspect (parts touching in the
+  photo but far apart in features, e.g. nose/belly); (c) a generic coarse-segment rule for any object (Tal: must work for non-animals too; idea: merge by
+  area threshold ~8-10%, or a generic custom VLPart vocabulary). Still open from 10-21: 2nd seed, `|gap|` in the logs, bear 159218.
+- **Obsidian:** inbox note `workspace_meta/obsidian_inbox/2026-10-22 XSEG 4-seg + Leg Collision/` (Hebrew, 4 figures).
+- SYNC TO MAC: demo/shic/xseg_vlpart4/horse_lvis56069/backproj_all_arms_lvis56069.png demo/shic/xseg_164135_vlpart8/backproj_compare_lvis164135.png demo/shic/lvis164135_mu/figures/leg_collision_compare/seg3_ZS_twostage_perseg_xsegFonly_cols234.png demo/shic/lvis164135_mu/figures/leg_collision_compare/seg3_ZS_twostage_perseg_cols234.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/leg_seg3 demo/shic/xseg_164135_sam1/horse_lvis164135/leg_seg3 demo/shic/fine_segments_vlpart/horse_lvis164135/options data/densepose_lvis/fine_segments_vlpart/lvis164135_fine_segments_partimagenet_thr0.3.pth data/densepose_lvis/fine_segments_vlpart/lvis56069_fine_segments_partimagenet_thr0.3.pth
+
 ## STATE AT CLOSE — 2026-10-21 (fifty-first pod, RTX 2000 Ada) — VLPART PART MAP SPLITS HEAD FROM CHEST; ALL 4 XSEG ARMS RE-RUN ON IT. **NOTHING IS RUNNING.**
 - **Semantic-SAM dropped before install:** its README says "The currently released checkpoints are only trained with SA-1B data" (SwinT + SwinL)
   -> no part training in any public weights, same data as SAM. Clone left at `$DISC_WS/semantic_sam_repo` (no env). The 10-21 Mac entry's

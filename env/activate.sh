@@ -18,7 +18,13 @@ export HF_HOME="$DISC_WS/.cache/huggingface"
 if [ -d /workspace/miniconda3 ]; then
     # RunPod: conda lives on the volume; env 'disc' is a symlink to the old env dir 'bsb'.
     source /workspace/miniconda3/etc/profile.d/conda.sh
-    conda activate disc
+    if [ -f /root/disc_env/READY ]; then
+        # local copy from env/pod_local_env.sh (2026-10-22): same env, imports fast (the volume is slow for small files)
+        case $- in *u*) set +u; source /root/disc_env/bin/activate; set -u ;;   # it reads unset vars (scripts run set -u)
+                   *) source /root/disc_env/bin/activate ;; esac
+    else
+        conda activate disc
+    fi
     # /workspace can't hold restrictive perms -> copy the GitHub deploy key to the pod's /root
     # (the repo's core.sshCommand points at /root/.ssh/id_ed25519_github).
     if [ -f /workspace/.ssh/id_ed25519_github ]; then

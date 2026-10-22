@@ -17,6 +17,7 @@ ap.add_argument('--box', type=int, nargs=4, default=None, metavar=('R0', 'R1', '
                 help='keep only the segment pixels inside rows [R0,R1] x cols [C0,C1] (a leg inside the big body segment)')
 ap.add_argument('--name', default=None, help='title/stats tag, default seg<N>')
 ap.add_argument('--pred_rel', default='alpha/alpha0.5/pred_f.pth', help='default = the production LORA-W reading (alpha 0.5, as the eval); pred_f.pth = full LORA')
+ap.add_argument('--cols', type=int, nargs='+', default=None, help='keep only these columns, 1-based (Tal 2026-10-22: 2 3 4)')
 ap.add_argument('--fs', type=int, default=8, help='title/label font size (Tal 2026-09-28: 18 for readability)')
 a = ap.parse_args(); dev = 'cuda'
 plt.rcParams.update({'xtick.labelsize': a.fs, 'ytick.labelsize': a.fs, 'axes.labelsize': a.fs})
@@ -37,7 +38,13 @@ r0, r1, c0, c1 = rr.min() - 12, rr.max() + 12, cc.min() - 12, cc.max() + 12
 rown = (rr - rr.min()) / max(rr.max() - rr.min(), 1); cmap = plt.cm.viridis
 runs = [('phase1', os.path.join(cfg['init_encoder_dir'], 'pred_f.pth'))] + \
        [(l, os.path.join(d, a.pred_rel)) for l, d in zip(a.labels, a.run_dirs)]
-fig, axs = plt.subplots(len(runs), 5, figsize=(34, 10 * len(runs)), gridspec_kw={'width_ratios': [2.2, 2.2, 2.2, 2, 2.5]})   # side view dropped (Tal 2026-09-28)
+WR = [2.2, 2.2, 2.2, 2, 2.5]
+keep = [c - 1 for c in a.cols] if a.cols else list(range(5))
+fig, _ax = plt.subplots(len(runs), len(keep), figsize=(34 * sum(WR[k] for k in keep) / sum(WR), 10 * len(runs)),
+                        gridspec_kw={'width_ratios': [WR[k] for k in keep]}, squeeze=False)   # side view dropped (Tal 2026-09-28)
+_, _dummy = plt.subplots(len(runs), 5, squeeze=False)                 # --cols: the dropped columns are drawn here and discarded
+axs = _dummy.copy()
+for j, k in enumerate(keep): axs[:, k] = _ax[:, j]
 legs = Vc[:, 1] < -0.2
 stats = {'seg': a.seg, 'box': a.box, 'name': a.name, 'n_pixels': int(len(rr)), 'n_centres': int(len(C))}
 for i, (name, pf) in enumerate(runs):
@@ -79,17 +86,19 @@ for i, (name, pf) in enumerate(runs):
     for n, (x, y) in zip(cnum, soft[ci][:, [0, 1]]): ax.annotate(str(n), (x, y), fontsize=min(a.fs + 2, 14), xytext=(2, 2), textcoords='offset points')
     ax.set_aspect('equal'); ax.set_xlim(-.2, .25); ax.set_ylim(-.75, -.25); ax.set_xlabel('x  (front view, zoomed)')
 for ax in axs[:, :3].flat: ax.set_xticks([]); ax.set_yticks([])
+if a.cols:                                                           # the ZS/run name sits on column 1; move it to the first kept one
+    for i, (name, _) in enumerate(runs): _ax[i, 0].set_ylabel('ZS (phase-1)' if name == 'phase1' else name, fontsize=a.fs + 6, fontweight='bold')
 HEAD = ['argmax mesh part\nper pixel\n(dots = %d centres)' % len(C),
         'soft weight on x- legs\n(0 = all x+, 1 = all x-)\nmixed = >10% on both',
         'reference:\ncolour = image row\nnumbers = centres (0 = top)',
         'SOFT-SNAP points\nfront view\n(colour = image row)', 'CENTRES only, soft-snap\nzoomed\n(number = centre, as in col 3)']
 import textwrap
 fig.canvas.draw()
-for ax in axs.flat:                                                  # wrap titles to the axis width (large --fs)
+for ax in _ax.flat:                                                  # wrap titles to the axis width (large --fs)
     t = ax.title; wid = ax.get_window_extent().width / fig.dpi * 72
     t.set_text('\n'.join(textwrap.fill(l, max(int(wid / (0.55 * a.fs)), 12)) for l in t.get_text().split('\n')))
 fig.tight_layout(rect=(0, 0, 1, 1 - 1.8 / (10 * len(runs))))
-for ax, h in zip(axs[0], HEAD):
+for ax, h in zip(_ax[0], [HEAD[k] for k in keep]):
     bb = ax.get_position(); fig.text((bb.x0 + bb.x1) / 2, 1 - 0.3 / (10 * len(runs)), h, ha='center', va='top', fontsize=a.fs + 2, fontweight='bold')
 fig.savefig(a.out, dpi=130)
 json.dump(stats, open(a.out.replace('.png', '.json'), 'w'), indent=1); print(json.dumps(stats, indent=1))

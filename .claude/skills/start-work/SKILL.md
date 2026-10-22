@@ -23,6 +23,8 @@ Say which one in the first line of the summary.
 - Skills link (one-time per volume): if `/workspace/.claude/skills` is missing, run
   `mkdir -p /workspace/.claude && ln -s /workspace/disc/.claude/skills /workspace/.claude/skills`
   (Tal starts Claude from `/workspace`, which would not see the repo's skills otherwise).
+- Local env copy (fast imports): start `setsid nohup bash env/pod_local_env.sh > /workspace/logs/pod_local_env.log 2>&1 < /dev/null &`
+  right away; it takes ~1-2 min, and `env/activate.sh` switches to `/root/disc_env` once `READY` exists. Report its last line at the end.
 - `nvidia-smi` (GPU model + memory, or "no GPU") and `df -h /workspace`.
 - Third-party clones: if `$DISC_WS/sam3_repo` / `$DISC_WS/pix2gestalt_repo` exist, make sure our scripts from `external/` are copied in
   (see `external/README.md`).

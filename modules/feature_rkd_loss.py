@@ -265,7 +265,7 @@ def measure_feature_mu_references(img_center, img_neighbors, msh_center, msh_nei
                 reduce(_pair_distances(msh_center, msh_neighbors, eps)))
 
 
-XSEG_FEAT_MODES = ('table', 'wonly', 'Fonly')
+XSEG_FEAT_MODES = ('table', 'wonly', 'Fonly', 'full')
 
 
 def xseg_feat_loss(img_center, img_neighbors, center_topk_idx, center_weights,
@@ -288,6 +288,8 @@ def xseg_feat_loss(img_center, img_neighbors, center_topk_idx, center_weights,
                Same gradient path as 'table' (w only), but the values drift with training.
       'Fonly'  V = vertex_features (live), w DETACHED; student = cos(s_i, s_j). The gradient reaches the
                encoder only by reshaping F under a fixed match -- the circular path on its own.
+      'full'   V = vertex_features (live), w live, nothing detached (Tal 2026-10-22); student = cos(s_i, s_j).
+               Both paths at once, the circular one included -- accepted knowingly.
 
         img_center         [n, D]        photo feature at each centre
         img_neighbors      [n, k, D]     photo feature at each CROSS-segment neighbour
@@ -312,8 +314,10 @@ def xseg_feat_loss(img_center, img_neighbors, center_topk_idx, center_weights,
         s = soft_feature(frozen_vertex_unit, idx, w)
     elif mode == 'wonly':
         s = soft_feature(vertex_features.detach(), idx, w)
-    else:
+    elif mode == 'Fonly':
         s = soft_feature(vertex_features, idx, w.detach())
+    else:
+        s = soft_feature(vertex_features, idx, w)
     s_c, s_n = s[:n], s[n:].view(n, k, -1)
     if mode == 'table':
         student = (s_c.unsqueeze(1) * s_n).sum(-1)                                  # [n, k]
