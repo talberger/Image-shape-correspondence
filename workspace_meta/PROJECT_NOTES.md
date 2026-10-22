@@ -3836,6 +3836,8 @@ git config --global --add safe.directory /workspace/bsb
   content (paths, numbers, lists) in the same message is also hard to read —
   when a message contains any technical content, write the whole message in
   English rather than switching between the two languages within it.
+- **KEEP REPLIES SHORT (Tal, 2026-10-22):** save words. Give the essentials in a few lines (status, result, what is next) and leave out
+  background, repeated context and how you got there. A reply does not have to be very short, just not wordy.
 - **SHOWING IMAGES (Tal, 2026-10-20): send them with the `SendUserFile` tool (`display: "render"`), one call per image, with a
   caption saying what the image is** (arm / run, key numbers). Markdown `![](path)` and plain file links do NOT render for Tal
   (VS Code extension) -- he should never have to click a link to see a figure. When comparing, send new and old side by side.
