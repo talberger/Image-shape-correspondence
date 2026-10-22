@@ -94,7 +94,7 @@ Goal (long-term): dense correspondence between an image and a 3D object.
 - **REMIND TAL (Mac):** the email to Itai summarising pods 50-52 (+ this ablation).
 - **NEXT:** Tal reviews the ablation; if feature RKD is dropped, the open direction is the cross-segment teacher: (a) two-stage on the VLPart map of 164135,
   (b) 2D geodesic by default, another teacher only where it is suspect, (c) a generic coarse-segment rule. Still open: 2nd seed, bear 159218.
-- **Obsidian:** DONE (Mac, 2026-10-23): merged into `2026-10-19 XSEG cross-segment feature RKD.md` as "Results 4" (+ Next), 3 figures in `Experiments/attachments/`; inbox emptied. SYNC TO MAC paths copied.
+- **Obsidian:** DONE (Mac, 2026-10-23): merged into `2026-10-19 XSEG cross-segment feature RKD.md` as "Results 4" (+ Next), 3 figures in `Experiments/attachments/`; inbox emptied. SYNC TO MAC: only the 3 figures (.png) copied -- the pod went down mid-sync; the .json + the 4 nofeat/featonly dirs are NOT on the Mac.
 - SYNC TO MAC: demo/shic/xseg_vlpart4/horse_lvis56069/featablation_backproj_lvis56069.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/featablation_backproj_lvis164135.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/leg_seg3/seg3_featablation_cols234.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/leg_seg3/seg3_featablation_cols234.json demo/shic/xseg_vlpart4/horse_lvis56069/nofeat demo/shic/xseg_vlpart4/horse_lvis56069/featonly demo/shic/xseg_164135_vlpart8/horse_lvis164135/nofeat demo/shic/xseg_164135_vlpart8/horse_lvis164135/featonly
 
 ## STATE AT CLOSE — 2026-10-22 (fifty-second pod, RTX 4000 Ada 20 GB) — XSEG ON A 4-SEG MAP + NEW `full` ARM; XSEG ON HORSE 164135 (LEG COLLISION) DOES NOT SEPARATE THE LEGS. **NOTHING IS RUNNING.**
