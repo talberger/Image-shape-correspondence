@@ -69,6 +69,34 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
+## STATE AT CLOSE — 2026-10-22 evening (fifty-third pod, RTX 2000 Ada 16 GB) — FEATURE-RKD ABLATION: THE FEATURE TERM ADDS NOTHING. **NOTHING IS RUNNING.**
+- **Question (Tal):** does feature RKD help at all? perseg vs XSEG is NOT only "+ feature RKD": perseg = 16 in-seg spatial pairs, XSEG = 8 in-seg spatial + 8 cross-seg -> feature.
+  Two new arms (Tal chose both, feature mode Fonly), same recipe and maps as pod 52 (56069 vlpart4, 164135 vlpart8):
+  `nofeat` = XSEG split with the feature term OFF (8 in-seg spatial + cycle, `--xseg_feat_weight 0`); `featonly` = Fonly on the cross pairs + cycle,
+  `--rkd_spatial_dist_weight 0` (Fonly weights from pod 52's balance: 56069 6.0896e-03, 164135 2.0469e-03).
+  | arm | 56069 mean | 164135 mean | 164135 leg x- / x+ / mixed (correct = x-) |
+  |---|---|---|---|
+  | ZS | 10.3 | 13.3 | 37 / 63 / 61 |
+  | two-stage | 39.3 | 6.4 | 100 / 0 / 2 |
+  | perseg (16 in) | 11.5 | 2.9 | 24 / 76 / 46 |
+  | **nofeat** (8 in, no feature) | **10.6** | **2.9** | 28 / 72 / 55 |
+  | Fonly (8 in + feature) | 12.0 | 2.9 | 46 / 54 / 45 |
+  | featonly (feature only) | 26.1 (pt2 66.9) | 11.6 | 11 / 89 / 22 |
+  - nofeat == Fonly within noise on both horses -> **the feature term adds nothing measurable**; only a small leg-mass shift (28 -> 46% x-), leg still not separated.
+  - featonly breaks the map (as the 09-04 spatial-off run did). The work is done by the in-segment spatial term; only two-stage (2D geodesic ACROSS segments) fixes the leg.
+  - 1 instance each, 1 seed, noise ~2. **Tal reviews the figures tomorrow.**
+- **Code:** `scripts/run_xseg_horse.sh` new `ARM=nofeat` / `ARM=featonly WEIGHT=<w>`; `analysis/diag_seg_mapping.py` falls back to the photo next to the mask when the map
+  is not `<tag>_fine_segments.pth` (VLPart maps). Queue `/workspace/logs/xseg_ablation/queue.sh` (has the 164135 env + TWOSTAGE path).
+  **Leg metric TRAP:** `diag_seg_mapping.py` takes the map from `--run_dirs[0]`'s config -> put the two-stage run FIRST to get seg 3 = the old-map front leg (1654 px, comparable with pod 52); an xseg run first gives vlpart8 seg 3 (another region).
+- Figures: `demo/shic/xseg_vlpart4/horse_lvis56069/featablation_backproj_lvis56069.png`, `demo/shic/xseg_164135_vlpart8/horse_lvis164135/featablation_backproj_lvis164135.png`,
+  `demo/shic/xseg_164135_vlpart8/horse_lvis164135/leg_seg3/seg3_featablation_cols234.png` (+ .json). Runs `data/densepose_lvis/runs_xseg_{vlpart4,164135_vlpart8}/<tag>/{nofeat,featonly}/`, logs `/workspace/logs/xseg_{vlpart4,164135_vlpart8}/{nofeat,featonly}.log`.
+- **Volume check (pod-52 request):** with the local env copy (`/root/disc_env`, unpack ~1-2 min at start) an arm takes ~5 min train + eval vs ~15 min on pod 52 -- the local env works; the raw volume speed was not measured.
+- **REMIND TAL (Mac):** the email to Itai summarising pods 50-52 (+ this ablation).
+- **NEXT:** Tal reviews the ablation; if feature RKD is dropped, the open direction is the cross-segment teacher: (a) two-stage on the VLPart map of 164135,
+  (b) 2D geodesic by default, another teacher only where it is suspect, (c) a generic coarse-segment rule. Still open: 2nd seed, bear 159218.
+- **Obsidian:** inbox note `workspace_meta/obsidian_inbox/2026-10-22 Feature RKD ablation/` (continues the XSEG note).
+- SYNC TO MAC: demo/shic/xseg_vlpart4/horse_lvis56069/featablation_backproj_lvis56069.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/featablation_backproj_lvis164135.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/leg_seg3/seg3_featablation_cols234.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/leg_seg3/seg3_featablation_cols234.json demo/shic/xseg_vlpart4/horse_lvis56069/nofeat demo/shic/xseg_vlpart4/horse_lvis56069/featonly demo/shic/xseg_164135_vlpart8/horse_lvis164135/nofeat demo/shic/xseg_164135_vlpart8/horse_lvis164135/featonly
+
 ## STATE AT CLOSE — 2026-10-22 (fifty-second pod, RTX 4000 Ada 20 GB) — XSEG ON A 4-SEG MAP + NEW `full` ARM; XSEG ON HORSE 164135 (LEG COLLISION) DOES NOT SEPARATE THE LEGS. **NOTHING IS RUNNING.**
 - **New arm `full`** (`--xseg_feat_mode full`, Tal): cross-segment feature RKD with NOTHING detached (V and w live; may form a cycle, accepted).
   `balance` now also reports its weight; `ARM=all` runs perseg, balance, table, wonly, Fonly, full.

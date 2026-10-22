@@ -9,6 +9,8 @@
 #   ARM=table|wonly|Fonly  exp 1, cross-segment feature student (see xseg_feat_loss in modules/feature_rkd_loss.py);
 #                          needs WEIGHT=<w> (from ARM=balance, equal grad norms = Tal's "similar proportion")
 #   ARM=full   no detach at all (V and w both live; may form a cycle, Tal 2026-10-22)
+#   ARM=nofeat   ablation (Tal 2026-10-22): the XSEG split with the feature term OFF (8 in-seg spatial + cycle; cross pairs dropped)
+#   ARM=featonly ablation: Fonly feature term on the cross pairs + cycle, rkd_spatial_dist OFF; needs WEIGHT=<Fonly w>
 #   ARM=balance_table  balance, then table at the equal-grad-norm weight (/RATIO)
 #   ARM=all     the whole queue: perseg, balance, then the three arms at the equal-grad-norm weights (RATIO=1 default)
 #
@@ -20,7 +22,7 @@
 # Other segment map (2026-10-21, VLPart): FINESEG=<label map .pth> SEGTAG=<name> -> runs_xseg_<name>/, xseg_<name>/, logs/xseg_<name>/. ~6-8 min per arm on an RTX 2000 Ada (estimate, not measured).
 set -euo pipefail
 source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
-ARM=${ARM:?ARM=perseg|balance|table|wonly|Fonly|full|all}
+ARM=${ARM:?ARM=perseg|balance|table|wonly|Fonly|full|nofeat|featonly|all}
 CLASS=horse; TAG=${TAG:-lvis56069}
 # Other horse instance (2026-10-22): TAG=<tag> SRC=<its inputs dir> TWOSTAGE=<pred_f.pth compared against> POSCOL=<position colours png>
 SRC=${SRC:-data/densepose_lvis/runs_debug_merge0.015_amodal_fillseg_sam3mask/$TAG}  # inputs + the two-stage run compared against
@@ -86,6 +88,9 @@ train_arm() {  # arm [weight]
     perseg) phase2 $p2 --num_neighbors_in_segment 16 --num_neighbors_out_segment 0 ;;
     table|wonly|Fonly|full) phase2 $p2 --num_neighbors_in_segment 8 --num_neighbors_out_segment 8 \
                           --xseg_feat_mode $arm --xseg_feat_weight ${2:?WEIGHT for $arm} ;;
+    nofeat) phase2 $p2 --num_neighbors_in_segment 8 --num_neighbors_out_segment 8 --xseg_feat_mode Fonly --xseg_feat_weight 0 ;;
+    featonly) phase2 $p2 --num_neighbors_in_segment 8 --num_neighbors_out_segment 8 \
+                     --xseg_feat_mode Fonly --xseg_feat_weight ${2:?WEIGHT for $arm} --rkd_spatial_dist_weight 0 ;;
     *) echo "unknown arm $arm"; exit 1 ;;
   esac
 }
@@ -100,7 +105,8 @@ balance() {
 }
 
 case $ARM in
-  perseg) train_arm perseg 2>&1 | tee $LOGS/perseg.log; analyse_bg perseg ;;
+  perseg|nofeat) train_arm $ARM 2>&1 | tee $LOGS/$ARM.log; analyse_bg $ARM ;;
+  featonly) train_arm featonly ${WEIGHT:?WEIGHT=<Fonly w> from ARM=balance} 2>&1 | tee $LOGS/featonly.log; analyse_bg featonly ;;
   balance) balance 2>&1 | tee $LOGS/balance.log ;;
   table|wonly|Fonly|full) train_arm $ARM ${WEIGHT:?WEIGHT=<w> from ARM=balance} 2>&1 | tee $LOGS/$ARM.log; analyse_bg $ARM ;;
   all|balance_table)

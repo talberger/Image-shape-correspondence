@@ -25,7 +25,9 @@ cfg = json.load(open(os.path.join(a.run_dirs[0], 'run_config.json')))
 geo2 = torch.load(cfg['geo_table_2d_path'], map_location='cpu'); coords = geo2['coords'].long()
 fs = torch.load(cfg['fine_seg_path'], map_location='cpu').numpy().copy()
 fs[~geo2['geodesic_safe_mask'].numpy().astype(bool)] = 0
-img = plt.imread(cfg['fine_seg_path'].replace('_fine_segments.pth', '.png'))
+_ip = cfg['fine_seg_path'].replace('_fine_segments.pth', '.png')
+if not _ip.endswith('.png'): _ip = cfg['object_mask_path'].replace('_mask.pth', '.png')   # other map names (VLPart): the photo next to the mask
+img = plt.imread(_ip)
 V = loadmesh(dir=cfg['obj_path'], name='mesh', load_rings=False).vertices.to(dev); Vc = V.cpu().numpy()
 vpart = part_of(Vc); pix = torch.load(cfg['pix_dino_features_path'], map_location='cpu')
 sel = fs == a.seg
