@@ -23,7 +23,8 @@
 set -euo pipefail
 source "${DISC_ROOT:-/workspace/disc}/env/activate.sh"; cd $DISC_ROOT
 ARM=${ARM:?ARM=perseg|balance|table|wonly|Fonly|full|nofeat|featonly|all}
-CLASS=horse; TAG=${TAG:-lvis56069}
+CLASS=${CLASS:-horse}; TAG=${TAG:-lvis56069}
+# Bears (2026-10-24): CLASS=bear TAG=lvis<id> SRC=<run dir> LOGS=<per-instance dir> NO_FIG=1 -- driven by scripts/run_xseg_bears.sh
 # Other horse instance (2026-10-22): TAG=<tag> SRC=<its inputs dir> TWOSTAGE=<pred_f.pth compared against> POSCOL=<position colours png>
 SRC=${SRC:-data/densepose_lvis/runs_debug_merge0.015_amodal_fillseg_sam3mask/$TAG}  # inputs + the two-stage run compared against
 TWOSTAGE=${TWOSTAGE:-$SRC/encoder_loraW_all_r4_phase2/alpha/alpha0.5/pred_f.pth}
@@ -35,10 +36,13 @@ POSCOL=${POSCOL:-demo/shic/debug_twostage/${CLASS}_${TAG}_merge0.015_amodal_fill
 FINESEG=${FINESEG:-$SRC/${TAG}_fine_segments.pth}; SEGTAG=${SEGTAG:+_$SEGTAG}
 # GEO2D: 2D geodesic table built WITH this FINESEG (centres are sampled from labelled pixels, so a map with other holes needs its own)
 GEO2D=${GEO2D:-$SRC/${TAG}_mask_geo_table_2d_seed0.pth}
-RUNS=data/densepose_lvis/runs_xseg$SEGTAG/$TAG; DEMO=demo/shic/xseg$SEGTAG/${CLASS}_$TAG; LOGS=$DISC_WS/logs/xseg$SEGTAG
+RUNS=${RUNS:-data/densepose_lvis/runs_xseg$SEGTAG}/$TAG; DEMO=${DEMO:-demo/shic/xseg$SEGTAG}/${CLASS}_$TAG; LOGS=${LOGS:-$DISC_WS/logs/xseg$SEGTAG}
+# amodal geodesic domain (bears whose SAM 3 mask is split): the same flag the two-stage run (run_lvis_worker.py) trained with
+AMODAL=(); [ -f $SRC/${TAG}_amodal_mask.pth ] && AMODAL=(--geodesic_domain_mask_path $SRC/${TAG}_amodal_mask.pth)
+NO_FIG=${NO_FIG:-0}   # 1 = skip the back-projection figure (eval only)
 mkdir -p $RUNS $DEMO $LOGS
 for f in $SRC/${TAG}_mask.pth $FINESEG $SRC/${TAG}_pix_sdsquare_fuse16.pth $GEO2D \
-         $SRC/${TAG}_gt.pth $TWOSTAGE $P1/encoder_checkpoint.pth $GEO3D $GEO228 $CHK $POSCOL; do
+         $SRC/${TAG}_gt.pth $TWOSTAGE $P1/encoder_checkpoint.pth $GEO3D $GEO228 $([ $NO_FIG = 1 ] || echo $CHK $POSCOL); do
   [ -e "$f" ] || { echo "MISSING INPUT $f"; exit 1; }
 done
 DIAG=$(python -c "import json; print(json.load(open('${GEO2D%.pth}_meta.json'))['true_diameter_2d'])")
@@ -54,24 +58,27 @@ phase2() {  # out_dir, extra flags...
     --mu_mode learned --mu_scope segment_aniso --mu_lr 5e-2 --mu_fit_space abs \
     --cyc_weight 1.676e-05 --cyc_v2 --cyc_temperature 0.05 --cyc_return_all_pixels --cyc_return_stride 3 \
     --lora_w_rank 4 --lora_w_lr 1e-3 --lora_w_layers all --no_step_checkpoints --num_iters 300 \
-    --out_dir $out "$@"
+    ${AMODAL[@]+"${AMODAL[@]}"} --out_dir $out "$@"
 }
 
 analyse() {  # arm name, run dir: alpha export, per-point eval (zs / two-stage / this arm), soft-snap back-projection
   # ONE python process for the four scripts (2026-10-22): torch is imported once (~60 s each on a slow volume).
   local arm=$1 p2=$2 o=$DEMO/$1
   mkdir -p $o/soft_mapping
-  python analysis/run_in_one_process.py \
-    analysis/export_pred_f_lora_alpha.py --obj_path $OBJ --name $NAME --phase1_checkpoint $P1/encoder_checkpoint.pth \
-      --lora_checkpoint $p2/encoder_checkpoint.pth --alphas 0.5 --out_dir $p2/alpha --- \
-    analysis/eval_lvis_ours.py --run_dir $SRC --tag $TAG --obj_path $OBJ --name $NAME --geodesics_path $GEO228 \
-      --out_json $o/eval_arms.json --arm zs=$P1/pred_f.pth --arm twostage=$TWOSTAGE --arm $arm=$p2/alpha/alpha0.5/pred_f.pth --- \
+  local fig=()
+  [ $NO_FIG = 1 ] || fig=(--- \
     analysis/color_mesh_from_soft_mapping.py --mask_path $SRC/${TAG}_mask.pth --img_path $SRC/$TAG.png --save_dir $o/soft_mapping \
       --features_path $SRC/${TAG}_pix_sdsquare_fuse16.pth --vertex_features_path $p2/alpha/alpha0.5/pred_f.pth --obj_path $OBJ --name $NAME \
       --color_mode position --color_path $POSCOL --k_vertices_per_pixel 10 --temperature 0.01 --- \
     analysis/color_image_from_knn.py --mask_path $SRC/${TAG}_mask.pth --knn_dir $o/soft_mapping \
       --knn_path $o/soft_mapping/${TAG}_mask_soft_snap_correspondence.pth --vertex_colors_path $CHK \
-      --source_image_path $SRC/$TAG.png --k 1 --save_dir $o --output_path $o/${TAG}_${arm}_backproj.png --no_side_by_side
+      --source_image_path $SRC/$TAG.png --k 1 --save_dir $o --output_path $o/${TAG}_${arm}_backproj.png --no_side_by_side)
+  python analysis/run_in_one_process.py \
+    analysis/export_pred_f_lora_alpha.py --obj_path $OBJ --name $NAME --phase1_checkpoint $P1/encoder_checkpoint.pth \
+      --lora_checkpoint $p2/encoder_checkpoint.pth --alphas 0.5 --out_dir $p2/alpha --- \
+    analysis/eval_lvis_ours.py --run_dir $SRC --tag $TAG --obj_path $OBJ --name $NAME --geodesics_path $GEO228 \
+      --out_json $o/eval_arms.json --arm zs=$P1/pred_f.pth --arm twostage=$TWOSTAGE --arm $arm=$p2/alpha/alpha0.5/pred_f.pth \
+    ${fig[@]+"${fig[@]}"}
   python - $o/eval_arms.json <<'EOF'
 import json, sys
 r = json.load(open(sys.argv[1]))
