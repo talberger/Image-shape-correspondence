@@ -69,7 +69,29 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
-## 2026-10-24 (MAC session, later) — XSEG ON THE 20-BEAR SUBSET, RUNNING ON RUN:AI (`tberger3-disc-gpu2`). Results: next entry.
+## STATE AT CLOSE — 2026-10-24 (MAC session driving Run:ai `tberger3-disc-gpu2`, RTX A6000) — XSEG ON THE 20-BEAR SUBSET: ALL ARMS ~ EQUAL, THE FEATURE TERM ADDS NOTHING. **NOTHING IS RUNNING; workspace STOPPED.**
+- **Result** (soft-snap, 228-normalised, mean over bears, 1 seed; segment map SAM 1; 2 bears have one segment -> perseg only):
+  | arm | mean (n=20 / 18) | paired vs twostage | better on |
+  |---|---|---|---|
+  | ZS | 39.3 | +3.83 (SE 3.21) | 7/20 |
+  | twostage (re-run on Run:ai) | 35.5 | -- | -- |
+  | perseg | 33.1 | -2.39 (SE 2.32) | 15/20 |
+  | nofeat | 33.1 | -2.57 (SE 2.49) | 12/18 |
+  | Fonly | 32.9 | -2.74 (SE 2.89) | 12/18 |
+  **Feature term: Fonly - nofeat = -0.16 (SE 0.87), Fonly better on 8/18 -> nothing**, same as the pod-53 horse ablation, now on 18 bears.
+  All three single-stage arms are ~1 SE better than twostage (not significant). twostage 35.5 = the pod value on this subset (ours#1 35.48) -> Run:ai reproduces.
+  Big per-bear swings both ways (117682: twostage 18.1 vs 40-47; 14974: twostage 55.0 vs 23-27; 154547: twostage 10.2 vs 20-23).
+- Figure (4 picked bears: Fonly best vs twostage 14974, worst 117682, median 11234, largest |Fonly - nofeat| 5459), on the Mac:
+  `demo/shic/xseg_bears_runai_sub20/backproj_compare_bears.png` (+ `summary.txt/.json` there). Built by `scripts/make_xseg_bears_figs.sh` (`fd8b27d`).
+- On the PVC: runs `data/densepose_lvis/runs_runai_sub20/` (two-stage + kept features/geo tables, ~1.5 GB/bear), `runs_xseg_bears_runai_sub20/`,
+  `demo/shic/xseg_bears_runai_sub20/`, logs `/workspace/logs/xseg_bears*.log`, `/workspace/logs/xseg_bears_runai_sub20/`. NOT on the RunPod volume.
+- Timing: 167 min for everything (two-stage prep ~2.5 min/bear, the 3 arms ~7 min/bear).
+- **NEXT (Tal decides):** feature RKD looks dead on 2 horses + 18 bears; cross-segment teacher options (a) two-stage on VLPart maps, (b) 2D geodesic by
+  default + another teacher only where suspect, (c) generic coarse-segment rule. Maybe perseg vs twostage on all 132 bears (the ~2.4 gain is 1 SE here).
+  Still: email to Itai (pods 50-53 + this).
+- **Obsidian:** DONE on the Mac (XSEG note, "Results 5").
+
+## 2026-10-24 (MAC session, later) — XSEG ON THE 20-BEAR SUBSET, SETUP ON RUN:AI (`tberger3-disc-gpu2`). Results: entry above.
 - **New workspace `tberger3-disc-gpu2`** (Tal): image `tberger3/disc:v2`, PVC `tal-disc-data` at `/workspace`, 1 GPU (got an RTX A6000 48 GB), **8 CPU, 32G RAM,
   LARGE SHARED MEMORY ON** (`/dev/shm` 30G). The old `tberger3-disc-gpu` (4 CPU, 16G, /dev/shm 64M) is stopped; only one may hold the RWO PVC.
 - **TRAP (why the new workspace): `/dev/shm` 64 MB by default** -> `build_geodesic_tables.py` writes the 2D table into shared memory
@@ -131,7 +153,7 @@ Goal (long-term): dense correspondence between an image and a 3D object.
 - Figures: `demo/shic/xseg_vlpart4/horse_lvis56069/featablation_backproj_lvis56069.png`, `demo/shic/xseg_164135_vlpart8/horse_lvis164135/featablation_backproj_lvis164135.png`,
   `demo/shic/xseg_164135_vlpart8/horse_lvis164135/leg_seg3/seg3_featablation_cols234.png` (+ .json). Runs `data/densepose_lvis/runs_xseg_{vlpart4,164135_vlpart8}/<tag>/{nofeat,featonly}/`, logs `/workspace/logs/xseg_{vlpart4,164135_vlpart8}/{nofeat,featonly}.log`.
 - **Volume check (pod-52 request):** with the local env copy (`/root/disc_env`, unpack ~1-2 min at start) an arm takes ~5 min train + eval vs ~15 min on pod 52 -- the local env works; the raw volume speed was not measured.
-- **REMIND TAL (Mac):** the email to Itai summarising pods 50-52 (+ this ablation).
+- **REMIND TAL (Mac):** the email to Itai summarising pods 50-52 (+ this ablation) -- still open 10-24.
 - **NEXT:** Tal reviews the ablation; if feature RKD is dropped, the open direction is the cross-segment teacher: (a) two-stage on the VLPart map of 164135,
   (b) 2D geodesic by default, another teacher only where it is suspect, (c) a generic coarse-segment rule. Still open: 2nd seed, bear 159218.
 - **Obsidian:** DONE (Mac, 2026-10-23): merged into `2026-10-19 XSEG cross-segment feature RKD.md` as "Results 4" (+ Next), 3 figures in `Experiments/attachments/`; inbox emptied. SYNC TO MAC: all copied (the rest on 10-24 over S3).
