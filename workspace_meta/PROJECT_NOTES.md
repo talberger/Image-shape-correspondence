@@ -69,6 +69,18 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
+## 2026-10-24 (MAC session) — RUN:AI IS SET UP; PLAN FOR THE FIRST DISC RUN THERE. **NOTHING IS RUNNING** (workspace stopped).
+- Run:ai (set up in another Claude session): VPN on; `runai login`; workspace `tberger3-disc-gpu` (project avidan, image `tberger3/disc:v2`, 1x RTX A5000 24 GB,
+  PVC `tal-disc-data` at `/workspace`, RWO = one workspace at a time); `runai workspace exec tberger3-disc-gpu -p avidan -- <cmd>`. Repo at `/workspace/disc` (HTTPS + token).
+  `env/Dockerfile` is on the Mac only, NOT committed yet. **STOP the workspace when done** (holds a lab GPU).
+- **First run (proposed):** `ARM=perseg bash scripts/run_xseg_horse.sh` (horse 56069, SAM 1 map, 300 steps + eval). Reference pod 50: 18.1 / 25.8 / 10.1, mean 18.0.
+- Inputs ~2 GB. On the Mac: `data/densepose_lvis/runs_debug_merge0.015_amodal_fillseg_sam3mask/lvis56069/` (mask, fine_segments, pix_sdsquare_fuse16, 2D geo table + meta,
+  gt, png, encoder_loraW_all_r4_phase2/alpha/alpha0.5/pred_f.pth) + `demo/shic/debug_twostage/horse_lvis56069_merge0.015_amodal_fillseg_sam3mask/summary/backproj_lvis56069/lvis56069_position_color.png`.
+  **NOT on the Mac (RunPod volume only):** `experiments/shic_horse/encoder_dfd_crossview_phase1/`, `experiments/shic_horse/geodesic_tables/shic_horse_geo_table_3d.pth`,
+  `data/densepose_lvis/eval_shic_horse/horse_heat_geodesics_228.npy`, `demo/shic/colored_mesh/horse_mesh_checker16_uv_color.pth`, `demo/shic/shapes/horse.obj`.
+- **Steps:** (1) VPN off: Tal starts a RunPod pod (CPU is enough); copy the missing files to the Mac with `sync_from_pod.sh`.
+  (2) VPN on, workspace Running: tar the files from the Mac into `/workspace/disc` via `runai workspace exec` (check that it passes stdin), `git pull`, run.
+
 ## STATE AT CLOSE — 2026-10-22 evening (fifty-third pod, RTX 2000 Ada 16 GB) — FEATURE-RKD ABLATION: THE FEATURE TERM ADDS NOTHING. **NOTHING IS RUNNING.**
 - **Question (Tal):** does feature RKD help at all? perseg vs XSEG is NOT only "+ feature RKD": perseg = 16 in-seg spatial pairs, XSEG = 8 in-seg spatial + 8 cross-seg -> feature.
   Two new arms (Tal chose both, feature mode Fonly), same recipe and maps as pod 52 (56069 vlpart4, 164135 vlpart8):
