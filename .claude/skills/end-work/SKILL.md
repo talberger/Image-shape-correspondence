@@ -35,6 +35,12 @@ unless asked). Write them into the notes entry as ONE line, repo-relative paths 
 `SYNC TO MAC: demo/shic/... data/densepose_lvis/...` -- the Mac's `/start-work` reads that line and copies them while the pod is still up.
 Tell Tal to run `/start-work` on the Mac BEFORE closing the pod (TAU VPN off).
 
+## 4b. Run:ai (driven from the Mac)
+Jobs there run detached (`setsid nohup`), so closing the Mac session does not stop them -- but the workspace is STOPPED by an idle-GPU
+timeout (~1 h). If nothing runs: tell Tal to STOP the workspace (or `runai workspace suspend tberger3-disc-gpu -p avidan`); if a job runs,
+record its log path and how to check it. Make sure no S3 key is left on the PVC (`/workspace/.aws`). Copy small results to the Mac
+(`runai workspace exec ... -- base64 -w0 <file> | base64 -d > <file>`) and note where the big ones are (PVC + whether they are on the volume).
+
 ## 5. Git
 `git add` only code, scripts, notes and the Obsidian inbox (never data, checkpoints or secrets); `git status -s` to check; commit with a
 message that says what the session did, ending with the attribution line from the system reminder; `git push`. On a pod, push needs

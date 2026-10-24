@@ -3949,6 +3949,11 @@ git config --global --add safe.directory /workspace/bsb
   content (paths, numbers, lists) in the same message is also hard to read —
   when a message contains any technical content, write the whole message in
   English rather than switching between the two languages within it.
+- **THREE MACHINES (Tal, 2026-10-24):** Mac (no GPU: analysis, figures, Obsidian), RunPod pod and Run:ai (GPU). GitHub syncs ONLY code +
+  this file; data (`data/ demo/ experiments/`, gitignored) moves separately. **The RunPod volume `DISC` is the master data store** (S3: volume
+  `c9sz3m72ye`, EU-RO-1, no pod needed). Mac <- volume: `sync_from_pod.sh` (pod up) or S3. Run:ai <- volume: S3 download INSIDE the workspace
+  (key put in temporarily, deleted after; recipe in the 2026-10-24 entry). Run:ai has NO Claude inside: it is driven from the Mac's Claude via
+  `runai workspace exec` (VPN on), and the Mac session writes the notes. Small results come back by `exec ... base64`.
 - **KEEP REPLIES SHORT (Tal, 2026-10-22):** save words. Give the essentials in a few lines (status, result, what is next) and leave out
   background, repeated context and how you got there. A reply does not have to be very short, just not wordy.
 - **SHOWING IMAGES (Tal, 2026-10-20): send them with the `SendUserFile` tool (`display: "render"`), one call per image, with a

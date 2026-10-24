@@ -30,6 +30,12 @@ Say which one in the first line of the summary.
   (see `external/README.md`).
 - Check nothing from an earlier session is still running (`ps aux | grep -E "python|train" | grep -v grep`) and say so.
 
+## 3b. Run:ai (only if Tal wants a GPU there; driven FROM the Mac session)
+TAU VPN on (RunPod SSH then times out). `export PATH=$HOME/.runai/bin:$PATH`; `runai workspace list -p avidan` (if "token has expired":
+Tal runs `runai login`). Start with `runai workspace resume tberger3-disc-gpu -p avidan` (image pull ~2 min; the web UI can lag).
+`runai workspace exec tberger3-disc-gpu -p avidan -- bash -c 'cd /workspace/disc && git pull --ff-only && nvidia-smi'`. Data comes from the
+RunPod volume over S3 (see "THREE MACHINES" in the notes). Long jobs: `setsid nohup ... > /workspace/logs/<x>.log 2>&1 < /dev/null &`.
+
 ## 4. Mac only: data from the pod
 `git pull` brings code and notes only; `data/` and `demo/` are gitignored. If the top notes entry (written by a pod's `/end-work`) has a
 `SYNC TO MAC:` line, copy those paths now:
