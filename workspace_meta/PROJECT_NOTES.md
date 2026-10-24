@@ -69,7 +69,18 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
-## 2026-10-24 (MAC session) — RUN:AI IS SET UP; PLAN FOR THE FIRST DISC RUN THERE. **NOTHING IS RUNNING** (workspace stopped).
+## 2026-10-24 (MAC session) — **FIRST DISC RUN ON RUN:AI WORKS END-TO-END** (perseg, horse 56069: mean 17.4 vs 18.0 on pod 50).
+- **Result:** `ARM=perseg bash scripts/run_xseg_horse.sh` on the A5000: soft-snap 16.7 / 25.8 / 9.7, mean **17.4** (pod 50: 18.1 / 25.8 / 10.1, 18.0; ZS 10.3 and
+  two-stage 39.3 reproduced exactly). Train 300 steps + eval ~3 min, peak GPU mem 2.2 GB. Log `/workspace/logs/runai_first_perseg.log`; figure copied to the Mac
+  `demo/shic/runai_first/horse_lvis56069/perseg/lvis56069_perseg_backproj.png`.
+- **How data got in (Run:ai cannot receive files from the Mac):** `runai workspace exec -i` fails ("inappropriate ioctl for device") and RunPod S3 has no presigned URLs.
+  Working path: S3 key temporarily in `/workspace/.aws/credentials` (600), boto3 in `/workspace/.tools/boto3` (`pip --target`), downloader `/workspace/.tools/s3get.py <paths>`
+  (copy in the Mac scratchpad only; paths relative to the volume's `disc/`), run DETACHED (`setsid nohup ... &`) -- a long `exec` gets cut off silently. Key deleted after.
+  Getting small files back: `runai workspace exec ... -- base64 -w0 <file> | base64 -d > <file>`.
+- Long jobs: always `setsid nohup ... > /workspace/logs/<x>.log 2>&1 < /dev/null &`, then poll with `exec tail`. No `pgrep`/`ps` in the image.
+- Workspace: the UI may stay on "Stopping..." after STOP; the CLI (`runai workspace list -p avidan`) is right. `runai workspace resume tberger3-disc-gpu -p avidan` starts it
+  (image pull ~2 min). Idle-GPU timeout ~1 h stops it automatically.
+- (Earlier plan text below kept for the inputs list.)
 - Run:ai (set up in another Claude session): VPN on; `runai login`; workspace `tberger3-disc-gpu` (project avidan, image `tberger3/disc:v2`, 1x RTX A5000 24 GB,
   PVC `tal-disc-data` at `/workspace`, RWO = one workspace at a time); `runai workspace exec tberger3-disc-gpu -p avidan -- <cmd>`. Repo at `/workspace/disc` (HTTPS + token).
   `env/Dockerfile` = the image `tberger3/disc:v2` (committed 2026-10-24). **STOP the workspace when done** (holds a lab GPU).
