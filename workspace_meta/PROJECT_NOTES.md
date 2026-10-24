@@ -69,6 +69,20 @@ Result: **405 KB -> 132 KB (-67%)**. What changed, and the rule used:
 Advisor: Itai Lang. Baseline: BSB (`threedle/bsb`), which we are extending.
 Goal (long-term): dense correspondence between an image and a 3D object.
 
+## 2026-10-24 (MAC session, later) — XSEG ON THE 20-BEAR SUBSET, RUNNING ON RUN:AI (`tberger3-disc-gpu2`). Results: next entry.
+- **New workspace `tberger3-disc-gpu2`** (Tal): image `tberger3/disc:v2`, PVC `tal-disc-data` at `/workspace`, 1 GPU (got an RTX A6000 48 GB), **8 CPU, 32G RAM,
+  LARGE SHARED MEMORY ON** (`/dev/shm` 30G). The old `tberger3-disc-gpu` (4 CPU, 16G, /dev/shm 64M) is stopped; only one may hold the RWO PVC.
+- **TRAP (why the new workspace): `/dev/shm` 64 MB by default** -> `build_geodesic_tables.py` writes the 2D table into shared memory
+  (2048 x 146k px x 4 B = 1.2 GB for bear 113202) -> every Dijkstra worker died with SIGBUS and the parent waited forever (looked like a fork deadlock:
+  children in futex_wait, 0 s CPU; found with `python -X faulthandler` + `kill -ABRT`). Two code "fixes" for a fork deadlock were pushed and REVERTED
+  (`749046f`, `77e325a`). No ptrace in the workspace (py-spy fails). No CPU quota is enforced (`cfs_quota_us -1`; 64 host cores visible).
+- Speed on the A6000 (bear 113202): geo table 13 s (pod 49 s), two-stage phase 2 94 s (pod 238 s); features 92 s (first run 270 s: SD + DINO download).
+- **Run:** `scripts/run_xseg_bears.sh` (new, `0b681d6`): prep = two-stage via `run_lvis_sam3_batch.sh --keep_intermediates` (re-run on Run:ai, not reused),
+  then per bear perseg / nofeat / balance + Fonly through `run_xseg_horse.sh` (now takes CLASS, RUNS/DEMO/LOGS, amodal domain, NO_FIG=1), then a summary
+  (means + paired differences vs twostage, and Fonly - nofeat = the feature term). Segment map SAM 1 (mask cache). One-segment bears: perseg only.
+  Log `/workspace/logs/xseg_bears.log`; per bear `/workspace/logs/xseg_bears_runai_sub20/lvis<id>/`; summary `.../summary.txt`. Resumable.
+  Inputs fetched from the RunPod volume over S3 (93 files: mask cache for the 20, bear assets, LVIS json, `.cache/dinov2_git`); key deleted after.
+
 ## 2026-10-24 (MAC session) — **FIRST DISC RUN ON RUN:AI WORKS END-TO-END** (perseg, horse 56069: mean 17.4 vs 18.0 on pod 50).
 - **Result:** `ARM=perseg bash scripts/run_xseg_horse.sh` on the A5000: soft-snap 16.7 / 25.8 / 9.7, mean **17.4** (pod 50: 18.1 / 25.8 / 10.1, 18.0; ZS 10.3 and
   two-stage 39.3 reproduced exactly). Train 300 steps + eval ~3 min, peak GPU mem 2.2 GB. Log `/workspace/logs/runai_first_perseg.log`; figure copied to the Mac
@@ -78,11 +92,11 @@ Goal (long-term): dense correspondence between an image and a 3D object.
   (copy in the Mac scratchpad only; paths relative to the volume's `disc/`), run DETACHED (`setsid nohup ... &`) -- a long `exec` gets cut off silently. Key deleted after.
   Getting small files back: `runai workspace exec ... -- base64 -w0 <file> | base64 -d > <file>`.
 - Long jobs: always `setsid nohup ... > /workspace/logs/<x>.log 2>&1 < /dev/null &`, then poll with `exec tail`. No `pgrep`/`ps` in the image.
-- Workspace: the UI may stay on "Stopping..." after STOP; the CLI (`runai workspace list -p avidan`) is right. `runai workspace resume tberger3-disc-gpu -p avidan` starts it
+- Workspace: the UI may stay on "Stopping..." after STOP; the CLI (`runai workspace list -p avidan`) is right. `runai workspace resume tberger3-disc-gpu2 -p avidan` starts it
   (image pull ~2 min). Idle-GPU timeout ~1 h stops it automatically.
 - (Earlier plan text below kept for the inputs list.)
 - Run:ai (set up in another Claude session): VPN on; `runai login`; workspace `tberger3-disc-gpu` (project avidan, image `tberger3/disc:v2`, 1x RTX A5000 24 GB,
-  PVC `tal-disc-data` at `/workspace`, RWO = one workspace at a time); `runai workspace exec tberger3-disc-gpu -p avidan -- <cmd>`. Repo at `/workspace/disc` (HTTPS + token).
+  PVC `tal-disc-data` at `/workspace`, RWO = one workspace at a time); `runai workspace exec tberger3-disc-gpu2 -p avidan -- <cmd>`. Repo at `/workspace/disc` (HTTPS + token).
   `env/Dockerfile` = the image `tberger3/disc:v2` (committed 2026-10-24). **STOP the workspace when done** (holds a lab GPU).
 - **First run (proposed):** `ARM=perseg bash scripts/run_xseg_horse.sh` (horse 56069, SAM 1 map, 300 steps + eval). Reference pod 50: 18.1 / 25.8 / 10.1, mean 18.0.
 - Inputs ~2 GB. On the Mac: `data/densepose_lvis/runs_debug_merge0.015_amodal_fillseg_sam3mask/lvis56069/` (mask, fine_segments, pix_sdsquare_fuse16, 2D geo table + meta,

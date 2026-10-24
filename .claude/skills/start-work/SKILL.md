@@ -32,8 +32,8 @@ Say which one in the first line of the summary.
 
 ## 3b. Run:ai (only if Tal wants a GPU there; driven FROM the Mac session)
 TAU VPN on (RunPod SSH then times out). `export PATH=$HOME/.runai/bin:$PATH`; `runai workspace list -p avidan` (if "token has expired":
-Tal runs `runai login`). Start with `runai workspace resume tberger3-disc-gpu -p avidan` (image pull ~2 min; the web UI can lag).
-`runai workspace exec tberger3-disc-gpu -p avidan -- bash -c 'cd /workspace/disc && git pull --ff-only && nvidia-smi'`. Data comes from the
+Tal runs `runai login`). Start with `runai workspace resume tberger3-disc-gpu2 -p avidan` (image pull ~2 min; the web UI can lag).
+`runai workspace exec tberger3-disc-gpu2 -p avidan -- bash -c 'cd /workspace/disc && git pull --ff-only && nvidia-smi'`. Data comes from the
 RunPod volume over S3 (see "THREE MACHINES" in the notes). Long jobs: `setsid nohup ... > /workspace/logs/<x>.log 2>&1 < /dev/null &`.
 
 ## 4. Mac only: data from the pod

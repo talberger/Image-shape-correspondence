@@ -37,7 +37,7 @@ Tell Tal to run `/start-work` on the Mac BEFORE closing the pod (TAU VPN off).
 
 ## 4b. Run:ai (driven from the Mac)
 Jobs there run detached (`setsid nohup`), so closing the Mac session does not stop them -- but the workspace is STOPPED by an idle-GPU
-timeout (~1 h). If nothing runs: tell Tal to STOP the workspace (or `runai workspace suspend tberger3-disc-gpu -p avidan`); if a job runs,
+timeout (~1 h). If nothing runs: tell Tal to STOP the workspace (or `runai workspace suspend tberger3-disc-gpu2 -p avidan`); if a job runs,
 record its log path and how to check it. Make sure no S3 key is left on the PVC (`/workspace/.aws`). Copy small results to the Mac
 (`runai workspace exec ... -- base64 -w0 <file> | base64 -d > <file>`) and note where the big ones are (PVC + whether they are on the volume).
 
