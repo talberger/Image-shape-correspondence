@@ -24,8 +24,7 @@ ts() { date -u +%F_%T; }
 
 if [ $STEP = prep ] || [ $STEP = all ]; then
   echo "##### prep: two-stage on $(echo $IDS | wc -w) bears [$(ts)] #####"
-  # GEO_TABLE_SUBPROCESS=1: the 2D geo table in a fresh process (the in-process fork pool deadlocks on the Run:ai image, see run_lvis_worker.py)
-  GEO_TABLE_SUBPROCESS=${GEO_TABLE_SUBPROCESS:-1} CLASS=bear ANN_IDS="$IDS" RESULTS=$RES_IN RUNS=$RUNS_IN WORKER_ARGS=--keep_intermediates bash scripts/run_lvis_sam3_batch.sh
+  CLASS=bear ANN_IDS="$IDS" RESULTS=$RES_IN RUNS=$RUNS_IN WORKER_ARGS=--keep_intermediates bash scripts/run_lvis_sam3_batch.sh
 fi
 
 if [ $STEP = arms ] || [ $STEP = all ]; then

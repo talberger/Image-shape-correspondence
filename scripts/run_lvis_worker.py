@@ -37,7 +37,6 @@ import glob
 import json
 import os
 import runpy
-import subprocess
 import shutil
 import sys
 import time
@@ -122,16 +121,6 @@ def stage(script, argv, timings, label=None):
     print(f'[time] {dt:.0f} s : {label or script}', flush=True)
 
 
-def stage_subprocess(script, argv, timings, label=None):
-    """Like stage(), but in a fresh `python <script>` process with OMP_NUM_THREADS=1 (see GEO_TABLE_SUBPROCESS)."""
-    t0 = time.time()
-    subprocess.run([sys.executable, os.path.join(REPO, script)] + [str(a) for a in argv], check=True, cwd=REPO,
-                   env={**os.environ, 'OMP_NUM_THREADS': '1'})
-    dt = time.time() - t0
-    timings.append((label or script, round(dt, 1)))
-    print(f'[time] {dt:.0f} s : {label or script} (subprocess)', flush=True)
-
-
 def run_instance(ann_id, args):
     tag = f'lvis{ann_id}'
     d = f'{args.runs_dir}/{tag}'
@@ -208,10 +197,7 @@ def run_instance(ann_id, args):
         amodal = ['--geodesic_domain_mask_path', amodal_path] if args.amodal_mask else []
         if args.amodal_mask and not os.path.exists(amodal_path):
             raise FileNotFoundError(f'--amodal_mask: {amodal_path} not found')
-    # GEO_TABLE_SUBPROCESS=1 (2026-10-24, Run:ai): run this stage as a FRESH process with OMP_NUM_THREADS=1. In-process, its fork()ed
-    # Dijkstra pool deadlocked on the Run:ai image (pip torch's libgomp: 102 threads in the parent after the features stage, every child
-    # stuck in futex_wait with 0 s CPU). Same command, same output; the pods (conda torch) never hit it, so it stays opt-in.
-    (stage_subprocess if os.environ.get('GEO_TABLE_SUBPROCESS') == '1' else stage)('analysis/build_geodesic_tables.py',
+    stage('analysis/build_geodesic_tables.py',
           ['--obj_path', OBJ, '--name', NAME, '--skip_3d',
            '--object_mask_path', f'{d}/{tag}_mask.pth',
            '--fine_seg_path', f'{d}/{tag}_fine_segments.pth',
