@@ -22,6 +22,7 @@ for id in $IDS; do
                  *) pf=$XRUNS/$tag/$arm/alpha/alpha0.5/pred_f.pth ;; esac
     [ -f $pf ] || { echo "  $tag $arm: no pred_f, skipped"; continue; }
     [ -f $O/${tag}_${arm}_backproj.png ] && continue
+    mkdir -p $O/soft_$arm
     python analysis/run_in_one_process.py \
       analysis/color_mesh_from_soft_mapping.py --mask_path $D/${tag}_mask.pth --img_path $D/$tag.png --save_dir $O/soft_$arm \
         --features_path $D/${tag}_pix_sdsquare_fuse16.pth --vertex_features_path $pf --obj_path $OBJ --name shic_bear \
