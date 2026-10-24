@@ -123,10 +123,10 @@ def stage(script, argv, timings, label=None):
 
 
 def stage_subprocess(script, argv, timings, label=None):
-    """Like stage(), but in a fresh `python <script>` process with OMP_NUM_THREADS=1 (see GEO_TABLE_SUBPROCESS)."""
+    """Like stage(), but in a fresh `python <script>` process, OMP_NUM_THREADS=1, Dijkstra pool started by spawn (see GEO_TABLE_SUBPROCESS)."""
     t0 = time.time()
     subprocess.run([sys.executable, os.path.join(REPO, script)] + [str(a) for a in argv], check=True, cwd=REPO,
-                   env={**os.environ, 'OMP_NUM_THREADS': '1'})
+                   env={**os.environ, 'OMP_NUM_THREADS': '1', 'GEO_MP_START': 'spawn'})
     dt = time.time() - t0
     timings.append((label or script, round(dt, 1)))
     print(f'[time] {dt:.0f} s : {label or script} (subprocess)', flush=True)
@@ -210,7 +210,8 @@ def run_instance(ann_id, args):
             raise FileNotFoundError(f'--amodal_mask: {amodal_path} not found')
     # GEO_TABLE_SUBPROCESS=1 (2026-10-24, Run:ai): run this stage as a FRESH process with OMP_NUM_THREADS=1. In-process, its fork()ed
     # Dijkstra pool deadlocked on the Run:ai image (pip torch's libgomp: 102 threads in the parent after the features stage, every child
-    # stuck in futex_wait with 0 s CPU). Same command, same output; the pods (conda torch) never hit it, so it stays opt-in.
+    # stuck in futex_wait with 0 s CPU; a fresh process still hung on its 2nd pool) -> fresh process + GEO_MP_START=spawn in
+    # build_geodesic_tables.py. Same command, same output; the pods (conda torch) never hit it, so it stays opt-in.
     (stage_subprocess if os.environ.get('GEO_TABLE_SUBPROCESS') == '1' else stage)('analysis/build_geodesic_tables.py',
           ['--obj_path', OBJ, '--name', NAME, '--skip_3d',
            '--object_mask_path', f'{d}/{tag}_mask.pth',

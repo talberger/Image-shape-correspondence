@@ -176,6 +176,12 @@ def feature_step_delta(feats, src_rows, src_cols, dst_rows, dst_cols, chunk=6553
     return np.clip(out, 0.0, None)
 
 
+def _init_worker(graph, centers, shm_name, shape, node_rc):
+    """Pool initializer for GEO_MP_START=spawn|forkserver: the worker gets the globals once, pickled, instead of by fork."""
+    global _WORKER_GRAPH, _WORKER_CENTERS, _WORKER_SHM_NAME, _WORKER_SHAPE, _WORKER_NODE_RC
+    _WORKER_GRAPH, _WORKER_CENTERS, _WORKER_SHM_NAME, _WORKER_SHAPE, _WORKER_NODE_RC = graph, centers, shm_name, shape, node_rc
+
+
 def _dijkstra_worker(bounds):
     """One worker's slice of the center list: Dijkstra from centers [start, end), written straight
     into the shared float32 output buffer. Returns (start, end, chunk_max, n_nonfinite) -- never the
@@ -230,8 +236,14 @@ def _dijkstra_parallel(graph, center_nodes, num_mask_pixels, num_workers, chunk_
 
         diagonal = 0.0
         t0 = time.time()
-        ctx = multiprocessing.get_context('fork')
-        with ctx.Pool(num_workers) as pool:
+        # GEO_MP_START=spawn (2026-10-24, Run:ai): fork() from this process deadlocked on the Run:ai image (pip torch / numpy wheels:
+        # every child stuck in futex_wait with 0 s CPU, even with OMP/OPENBLAS/MKL_NUM_THREADS=1 -- the first pool ran, the second hung).
+        # spawn starts clean children and hands them the globals once through the initializer; same rows, bit-identical table.
+        start_method = os.environ.get('GEO_MP_START', 'fork')
+        ctx = multiprocessing.get_context(start_method)
+        init = {} if start_method == 'fork' else dict(
+            initializer=_init_worker, initargs=(graph, center_nodes, shm.name, shape, node_rc))
+        with ctx.Pool(num_workers, **init) as pool:
             for done, (start, end, chunk_max, n_nonfinite) in enumerate(
                     pool.imap_unordered(_dijkstra_worker, bounds), 1):
                 if n_nonfinite:
