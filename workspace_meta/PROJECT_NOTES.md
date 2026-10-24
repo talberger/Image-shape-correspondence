@@ -78,7 +78,10 @@ Goal (long-term): dense correspondence between an image and a 3D object.
   gt, png, encoder_loraW_all_r4_phase2/alpha/alpha0.5/pred_f.pth) + `demo/shic/debug_twostage/horse_lvis56069_merge0.015_amodal_fillseg_sam3mask/summary/backproj_lvis56069/lvis56069_position_color.png`.
   **NOT on the Mac (RunPod volume only):** `experiments/shic_horse/encoder_dfd_crossview_phase1/`, `experiments/shic_horse/geodesic_tables/shic_horse_geo_table_3d.pth`,
   `data/densepose_lvis/eval_shic_horse/horse_heat_geodesics_228.npy`, `demo/shic/colored_mesh/horse_mesh_checker16_uv_color.pth`, `demo/shic/shapes/horse.obj`.
-- **Steps:** (1) VPN off: Tal starts a RunPod pod (CPU is enough); copy the missing files to the Mac with `sync_from_pod.sh`.
+- **RUNPOD VOLUME OVER S3, NO POD NEEDED (2026-10-24):** volume `DISC` id `c9sz3m72ye`, EU-RO-1, S3 enabled. Mac: key in `~/.aws/credentials` profile `runpods3`
+  (never in the repo), aws CLI in `~/.local/awscli-venv/bin/aws`. Volume root = the pod's `/workspace`. Example:
+  `~/.local/awscli-venv/bin/aws --profile runpods3 --region EU-RO-1 --endpoint-url https://s3api-eu-ro-1.runpod.io s3 cp s3://c9sz3m72ye/disc/<path> <path>` (`s3 sync` for dirs).
+- **Steps:** (1) DONE 10-24: the 5 missing inputs were downloaded to the Mac over S3.
   (2) VPN on, workspace Running: tar the files from the Mac into `/workspace/disc` via `runai workspace exec` (check that it passes stdin), `git pull`, run.
 
 ## STATE AT CLOSE — 2026-10-22 evening (fifty-third pod, RTX 2000 Ada 16 GB) — FEATURE-RKD ABLATION: THE FEATURE TERM ADDS NOTHING. **NOTHING IS RUNNING.**
@@ -106,7 +109,7 @@ Goal (long-term): dense correspondence between an image and a 3D object.
 - **REMIND TAL (Mac):** the email to Itai summarising pods 50-52 (+ this ablation).
 - **NEXT:** Tal reviews the ablation; if feature RKD is dropped, the open direction is the cross-segment teacher: (a) two-stage on the VLPart map of 164135,
   (b) 2D geodesic by default, another teacher only where it is suspect, (c) a generic coarse-segment rule. Still open: 2nd seed, bear 159218.
-- **Obsidian:** DONE (Mac, 2026-10-23): merged into `2026-10-19 XSEG cross-segment feature RKD.md` as "Results 4" (+ Next), 3 figures in `Experiments/attachments/`; inbox emptied. SYNC TO MAC: only the 3 figures (.png) copied -- the pod went down mid-sync; the .json + the 4 nofeat/featonly dirs are NOT on the Mac.
+- **Obsidian:** DONE (Mac, 2026-10-23): merged into `2026-10-19 XSEG cross-segment feature RKD.md` as "Results 4" (+ Next), 3 figures in `Experiments/attachments/`; inbox emptied. SYNC TO MAC: all copied (the rest on 10-24 over S3).
 - SYNC TO MAC: demo/shic/xseg_vlpart4/horse_lvis56069/featablation_backproj_lvis56069.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/featablation_backproj_lvis164135.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/leg_seg3/seg3_featablation_cols234.png demo/shic/xseg_164135_vlpart8/horse_lvis164135/leg_seg3/seg3_featablation_cols234.json demo/shic/xseg_vlpart4/horse_lvis56069/nofeat demo/shic/xseg_vlpart4/horse_lvis56069/featonly demo/shic/xseg_164135_vlpart8/horse_lvis164135/nofeat demo/shic/xseg_164135_vlpart8/horse_lvis164135/featonly
 
 ## STATE AT CLOSE — 2026-10-22 (fifty-second pod, RTX 4000 Ada 20 GB) — XSEG ON A 4-SEG MAP + NEW `full` ARM; XSEG ON HORSE 164135 (LEG COLLISION) DOES NOT SEPARATE THE LEGS. **NOTHING IS RUNNING.**
